@@ -1,9 +1,10 @@
 
-#include "Engine/Header.h"
+#include "App.h"
 
 int main()
 {
-	Okay::helloWorld();
+	App voxelWorld;
+	voxelWorld.run();
 
 	return 0;
 }
