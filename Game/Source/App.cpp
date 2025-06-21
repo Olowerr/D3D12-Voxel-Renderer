@@ -17,10 +17,10 @@ void App::onUpdate(TimeStep dt)
 	passedTime += dt;
 	numFrames++;
 
-	if (passedTime >= 5.f)
+	if (passedTime >= 1.f)
 	{
 		TimeStep averageFps = passedTime / (float)numFrames;
-		passedTime -= 5.f;
+		passedTime -= 1.f;
 		numFrames = 0;
 
 		static std::string windowTitle;

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Window.h"
+#include "Engine/D3D12/Renderer.h"
 #include "Time.h"
 
 namespace Okay
@@ -20,6 +20,6 @@ namespace Okay
 		Window m_window;
 
 	private:
-
+		Renderer m_renderer;
 	};
 }

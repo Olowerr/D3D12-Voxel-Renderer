@@ -10,11 +10,13 @@ namespace Okay
 		OKAY_ASSERT(glInit);
 
 		m_window.initiate(windowTitle, windowWidth, windowHeight);
+		m_renderer.initialize(m_window);
 	}
 
 	Application::~Application()
 	{
 		m_window.shutdown();
+		m_renderer.shutdown();
 	}
 
 	void Application::run()
@@ -29,6 +31,8 @@ namespace Okay
 			m_window.processMessages();
 
 			onUpdate(timeStep);
+
+			m_renderer.render();
 		}
 	}
 }

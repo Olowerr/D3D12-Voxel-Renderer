@@ -24,12 +24,15 @@
     <ClInclude Include="Source\Engine\Application\KeyCodes.h" />
     <ClInclude Include="Source\Engine\Application\Time.h" />
     <ClInclude Include="Source\Engine\Application\Window.h" />
+    <ClInclude Include="Source\Engine\D3D12\OkayD3D12.h" />
+    <ClInclude Include="Source\Engine\D3D12\Renderer.h" />
     <ClInclude Include="Source\Engine\Okay.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Engine\Application\Application.cpp" />
     <ClCompile Include="Source\Engine\Application\Input.cpp" />
     <ClCompile Include="Source\Engine\Application\Window.cpp" />
+    <ClCompile Include="Source\Engine\D3D12\Renderer.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
@@ -113,10 +116,11 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
     <Lib>
-      <AdditionalDependencies>d3d12.lib;glfw3.lib;</AdditionalDependencies>
+      <AdditionalDependencies>d3d12.lib;dxgi.lib;glfw3.lib;</AdditionalDependencies>
     </Lib>
     <Lib>
       <AdditionalLibraryDirectories>$(ProjectDir)Deps\Lib\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>/ignore:4006 %(AdditionalOptions)</AdditionalOptions>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -137,10 +141,11 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
     <Lib>
-      <AdditionalDependencies>d3d12.lib;glfw3.lib;</AdditionalDependencies>
+      <AdditionalDependencies>d3d12.lib;dxgi.lib;glfw3.lib;</AdditionalDependencies>
     </Lib>
     <Lib>
       <AdditionalLibraryDirectories>$(ProjectDir)Deps\Lib\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>/ignore:4006 %(AdditionalOptions)</AdditionalOptions>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -157,10 +162,11 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
     <Lib>
-      <AdditionalDependencies>d3d12.lib;glfw3.lib;</AdditionalDependencies>
+      <AdditionalDependencies>d3d12.lib;dxgi.lib;glfw3.lib;</AdditionalDependencies>
     </Lib>
     <Lib>
       <AdditionalLibraryDirectories>$(ProjectDir)Deps\Lib\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>/ignore:4006 %(AdditionalOptions)</AdditionalOptions>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -181,10 +187,11 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
     <Lib>
-      <AdditionalDependencies>d3d12.lib;glfw3.lib;</AdditionalDependencies>
+      <AdditionalDependencies>d3d12.lib;dxgi.lib;glfw3.lib;</AdditionalDependencies>
     </Lib>
     <Lib>
       <AdditionalLibraryDirectories>$(ProjectDir)Deps\Lib\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>/ignore:4006 %(AdditionalOptions)</AdditionalOptions>
     </Lib>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
