@@ -30,6 +30,9 @@ namespace Okay
 			DX_CHECK(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&frame.pFence)));
 			frame.fenceValue = 0;
 		}
+	
+
+		createVoxelRenderPass();
 	}
 
 	void Renderer::shutdown()
@@ -40,6 +43,9 @@ namespace Okay
 		D3D12_RELEASE(m_pDevice);
 		D3D12_RELEASE(m_pCommandQueue);
 		D3D12_RELEASE(m_pSwapChain);
+
+		D3D12_RELEASE(m_pVoxelRootSignature);
+		D3D12_RELEASE(m_pVoxelPSO);
 
 		D3D12_RELEASE(m_pRTVDescHeap);
 		for (FrameResources& frame : m_frames)
@@ -60,8 +66,7 @@ namespace Okay
 
 	void Renderer::preRender()
 	{
-		uint32_t backBufferIdx = m_pSwapChain->GetCurrentBackBufferIndex();
-		FrameResources& frame = m_frames[backBufferIdx];
+		FrameResources& frame = m_frames[m_pSwapChain->GetCurrentBackBufferIndex()];
 
 		wait(frame.pFence, frame.fenceValue);
 		reset(frame.pCommandAllocator, frame.pCommandList);
@@ -74,13 +79,24 @@ namespace Okay
 
 	void Renderer::renderWorld()
 	{
+		FrameResources& frame = m_frames[m_pSwapChain->GetCurrentBackBufferIndex()];
 
+		frame.pCommandList->SetGraphicsRootSignature(m_pVoxelRootSignature);
+		frame.pCommandList->SetPipelineState(m_pVoxelPSO);
+
+		frame.pCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		
+		frame.pCommandList->RSSetViewports(1, &m_viewport);
+		frame.pCommandList->RSSetScissorRects(1, &m_scissorRect);
+
+		frame.pCommandList->OMSetRenderTargets(1, &frame.cpuBackBufferRTV, false, nullptr);
+
+		frame.pCommandList->DrawInstanced(3, 1, 0, 0);
 	}
 
 	void Renderer::postRender()
 	{
-		uint32_t backBufferIdx = m_pSwapChain->GetCurrentBackBufferIndex();
-		FrameResources& frame = m_frames[backBufferIdx];
+		FrameResources& frame = m_frames[m_pSwapChain->GetCurrentBackBufferIndex()];
 
 		transitionResource(frame.pCommandList, frame.pBackBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
 
@@ -210,7 +226,6 @@ namespace Okay
 
 		m_pSwapChain = (IDXGISwapChain3*)pSwapChain;
 
-
 		for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		{
 			DX_CHECK(m_pSwapChain->GetBuffer(i, IID_PPV_ARGS(&m_frames[i].pBackBuffer)));
@@ -219,6 +234,23 @@ namespace Okay
 			m_frames[i].cpuBackBufferRTV.ptr += (uint64_t)i * m_rtvIncrementSize;
 
 			m_pDevice->CreateRenderTargetView(m_frames[i].pBackBuffer, nullptr, m_frames[i].cpuBackBufferRTV);
+
+			if (i == 0)
+			{
+				D3D12_RESOURCE_DESC backBufferDesc = m_frames[i].pBackBuffer->GetDesc();
+
+				m_viewport.TopLeftX = 0;
+				m_viewport.TopLeftY = 0;
+				m_viewport.Width = (float)backBufferDesc.Width;
+				m_viewport.Height = (float)backBufferDesc.Height;
+				m_viewport.MinDepth = 0.f;
+				m_viewport.MaxDepth = 1.f;
+
+				m_scissorRect.left = 0;
+				m_scissorRect.top = 0;
+				m_scissorRect.right = (LONG)backBufferDesc.Width;
+				m_scissorRect.bottom = (LONG)backBufferDesc.Height;
+			}
 		}
 	}
 
@@ -231,5 +263,56 @@ namespace Okay
 		descHeapDesc.Flags = shaderVisible ? D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE : D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 
 		DX_CHECK(m_pDevice->CreateDescriptorHeap(&descHeapDesc, IID_PPV_ARGS(ppDescriptorHeap)));
+	}
+
+	void Renderer::createRootSignature(const D3D12_ROOT_SIGNATURE_DESC* pDesc, ID3D12RootSignature** ppOutRootSignature)
+	{
+		ID3DBlob* pRootBlob = nullptr;
+		ID3DBlob* pErrorBlob = nullptr;
+
+		HRESULT hr = D3D12SerializeRootSignature(pDesc, D3D_ROOT_SIGNATURE_VERSION_1_0, &pRootBlob, &pErrorBlob);
+		if (FAILED(hr))
+		{
+			printf("Root serialization failed: %s\n", pErrorBlob ? (char*)pErrorBlob->GetBufferPointer() : "No errors produced.");
+			OKAY_ASSERT(false);
+		}
+
+		DX_CHECK(m_pDevice->CreateRootSignature(0, pRootBlob->GetBufferPointer(), pRootBlob->GetBufferSize(), IID_PPV_ARGS(ppOutRootSignature)));
+
+		D3D12_RELEASE(pRootBlob);
+		D3D12_RELEASE(pErrorBlob);
+	}
+
+	void Renderer::createVoxelRenderPass()
+	{
+		D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
+		rootDesc.NumParameters = 0;
+		rootDesc.pParameters = nullptr;
+		rootDesc.NumStaticSamplers = 0;
+		rootDesc.pStaticSamplers = nullptr;
+		rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+
+		createRootSignature(&rootDesc, &m_pVoxelRootSignature);
+
+
+		ID3DBlob* pShaderBlobs[5] = {};
+		uint32_t shaderBlobIdx = 0;
+
+		D3D12_GRAPHICS_PIPELINE_STATE_DESC pipelineDesc = createDefaultGraphicsPipelineStateDesc();
+		pipelineDesc.pRootSignature = m_pVoxelRootSignature;
+
+		pipelineDesc.VS = compileShader(SHADER_PATH / "VertexShader.hlsl", "vs_5_1", &pShaderBlobs[shaderBlobIdx++]);
+		pipelineDesc.PS = compileShader(SHADER_PATH / "PixelShader.hlsl", "ps_5_1", &pShaderBlobs[shaderBlobIdx++]);
+
+		pipelineDesc.DepthStencilState.DepthEnable = false;
+
+		pipelineDesc.NumRenderTargets = 1;
+		pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+		DX_CHECK(m_pDevice->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_pVoxelPSO)));
+
+
+		for (ID3DBlob*& pBlob : pShaderBlobs)
+			D3D12_RELEASE(pBlob);
 	}
 }

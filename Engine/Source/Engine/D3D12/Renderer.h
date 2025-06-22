@@ -52,6 +52,10 @@ namespace Okay
 
 		void createDescriptorHeap(ID3D12DescriptorHeap** ppDescriptorHeap, D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors, bool shaderVisible);
 
+		void createRootSignature(const D3D12_ROOT_SIGNATURE_DESC* pDesc, ID3D12RootSignature** ppOutRootSignature);
+
+		void createVoxelRenderPass();
+
 	private:
 		ID3D12Device* m_pDevice = nullptr;
 		ID3D12CommandQueue* m_pCommandQueue = nullptr;
@@ -59,6 +63,12 @@ namespace Okay
 
 		ID3D12DescriptorHeap* m_pRTVDescHeap = nullptr;
 		FrameResources m_frames[MAX_FRAMES_IN_FLIGHT] = {};
+
+		ID3D12RootSignature* m_pVoxelRootSignature = nullptr;
+		ID3D12PipelineState* m_pVoxelPSO = nullptr;
+
+		D3D12_VIEWPORT m_viewport = {};
+		D3D12_RECT m_scissorRect = {};
 
 	private:
 		uint32_t m_rtvIncrementSize = INVALID_UINT32;
