@@ -4,8 +4,23 @@
 
 namespace Okay
 {
+	struct FrameResources
+	{
+		uint64_t fenceValue = INVALID_UINT64;
+		ID3D12Fence* pFence = nullptr;
+
+		ID3D12CommandAllocator* pCommandAllocator = nullptr;
+		ID3D12GraphicsCommandList* pCommandList = nullptr;
+		
+		ID3D12Resource* pBackBuffer = {};
+		D3D12_CPU_DESCRIPTOR_HANDLE cpuBackBufferRTV = {};
+	};
+
 	class Renderer
 	{
+	public:
+		static const uint32_t MAX_FRAMES_IN_FLIGHT = 3;
+
 	public:
 		Renderer() = default;
 		~Renderer() = default;
@@ -20,7 +35,7 @@ namespace Okay
 		void renderWorld();
 		void postRender();
 
-		void signal(uint64_t& fenceValue);
+		void signal(ID3D12Fence* pFence, uint64_t& fenceValue);
 		void execute(ID3D12GraphicsCommandList* pCommandList);
 		void wait(ID3D12Fence* pFence, uint64_t fenceValue);
 		void reset(ID3D12CommandAllocator* pCommandAlloator, ID3D12GraphicsCommandList* pCommandList);
@@ -43,15 +58,7 @@ namespace Okay
 		IDXGISwapChain3* m_pSwapChain = nullptr;
 
 		ID3D12DescriptorHeap* m_pRTVDescHeap = nullptr;
-
-		// Temp
-		uint64_t m_fenceValue = INVALID_UINT64;
-		ID3D12Fence* m_pFence = nullptr;
-		ID3D12CommandAllocator* m_pCommandAllocator = nullptr;
-		ID3D12GraphicsCommandList* m_pCommandList = nullptr;
-		
-		ID3D12Resource* m_pBackBuffers[2] = {};
-		D3D12_CPU_DESCRIPTOR_HANDLE m_cpuBackBufferRTVs[2] = {};
+		FrameResources m_frames[MAX_FRAMES_IN_FLIGHT] = {};
 
 	private:
 		uint32_t m_rtvIncrementSize = INVALID_UINT32;

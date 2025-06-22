@@ -4,8 +4,10 @@ namespace Okay
 {
 	void Renderer::initialize(const Window& window)
 	{
+#ifdef _DEBUG
 		enableDebugLayer();
 		enableGPUBasedValidation();
+#endif
 
 		IDXGIFactory* pFactory = nullptr;
 		DX_CHECK(CreateDXGIFactory(IID_PPV_ARGS(&pFactory)));
@@ -14,35 +16,38 @@ namespace Okay
 		m_rtvIncrementSize = m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
 		createCommandQueue();
-		createDescriptorHeap(&m_pRTVDescHeap, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 2, false);
+		createDescriptorHeap(&m_pRTVDescHeap, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, MAX_FRAMES_IN_FLIGHT, false);
 		createSwapChain(pFactory, window);
 
 		D3D12_RELEASE(pFactory);
 
-		DX_CHECK(m_pDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_pCommandAllocator)));
-		DX_CHECK(m_pDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_pCommandAllocator, nullptr, IID_PPV_ARGS(&m_pCommandList)));
-		DX_CHECK(m_pCommandList->Close());
+		for (FrameResources& frame : m_frames)
+		{
+			DX_CHECK(m_pDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&frame.pCommandAllocator)));
+			DX_CHECK(m_pDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, frame.pCommandAllocator, nullptr, IID_PPV_ARGS(&frame.pCommandList)));
+			DX_CHECK(frame.pCommandList->Close());
 
-		DX_CHECK(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_pFence)));
-		m_fenceValue = 0;
+			DX_CHECK(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&frame.pFence)));
+			frame.fenceValue = 0;
+		}
 	}
 
 	void Renderer::shutdown()
 	{
-		wait(m_pFence, m_fenceValue);
+		for (FrameResources& frame : m_frames)
+			wait(frame.pFence, frame.fenceValue);
 
 		D3D12_RELEASE(m_pDevice);
 		D3D12_RELEASE(m_pCommandQueue);
 		D3D12_RELEASE(m_pSwapChain);
 
-		D3D12_RELEASE(m_pFence);
-		D3D12_RELEASE(m_pCommandAllocator);
-		D3D12_RELEASE(m_pCommandList);
-
 		D3D12_RELEASE(m_pRTVDescHeap);
-		for (ID3D12Resource*& pBackBuffer : m_pBackBuffers)
+		for (FrameResources& frame : m_frames)
 		{
-			D3D12_RELEASE(pBackBuffer);
+			D3D12_RELEASE(frame.pFence);
+			D3D12_RELEASE(frame.pCommandAllocator);
+			D3D12_RELEASE(frame.pCommandList);
+			D3D12_RELEASE(frame.pBackBuffer);
 		}
 	}
 
@@ -55,14 +60,16 @@ namespace Okay
 
 	void Renderer::preRender()
 	{
-		wait(m_pFence, m_fenceValue);
-		reset(m_pCommandAllocator, m_pCommandList);
+		uint32_t backBufferIdx = m_pSwapChain->GetCurrentBackBufferIndex();
+		FrameResources& frame = m_frames[backBufferIdx];
 
-		uint32_t currentBackBufferIdx = m_pSwapChain->GetCurrentBackBufferIndex();
-		transitionResource(m_pCommandList, m_pBackBuffers[currentBackBufferIdx], D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+		wait(frame.pFence, frame.fenceValue);
+		reset(frame.pCommandAllocator, frame.pCommandList);
 
-		const static float CLEAR_COLOUR[4] = {0.4f, 0.3f, 0.7f, 0.f};
-		m_pCommandList->ClearRenderTargetView(m_cpuBackBufferRTVs[currentBackBufferIdx], CLEAR_COLOUR, 0, nullptr);
+		transitionResource(frame.pCommandList, frame.pBackBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+		static const float CLEAR_COLOUR[4] = {0.4f, 0.3f, 0.7f, 0.f};
+		frame.pCommandList->ClearRenderTargetView(frame.cpuBackBufferRTV, CLEAR_COLOUR, 0, nullptr);
 	}
 
 	void Renderer::renderWorld()
@@ -72,18 +79,20 @@ namespace Okay
 
 	void Renderer::postRender()
 	{
-		uint32_t currentBackBufferIdx = m_pSwapChain->GetCurrentBackBufferIndex();
-		transitionResource(m_pCommandList, m_pBackBuffers[currentBackBufferIdx], D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+		uint32_t backBufferIdx = m_pSwapChain->GetCurrentBackBufferIndex();
+		FrameResources& frame = m_frames[backBufferIdx];
 
-		execute(m_pCommandList);
+		transitionResource(frame.pCommandList, frame.pBackBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+
+		execute(frame.pCommandList);
 		m_pSwapChain->Present(0, 0);
 
-		signal(m_fenceValue);
+		signal(frame.pFence, frame.fenceValue);
 	}
 
-	void Renderer::signal(uint64_t& fenceValue)
+	void Renderer::signal(ID3D12Fence* pFence, uint64_t& fenceValue)
 	{
-		DX_CHECK(m_pCommandQueue->Signal(m_pFence, ++fenceValue));
+		DX_CHECK(m_pCommandQueue->Signal(pFence, ++fenceValue));
 	}
 
 	void Renderer::execute(ID3D12GraphicsCommandList* pCommandList)
@@ -94,7 +103,7 @@ namespace Okay
 
 	void Renderer::wait(ID3D12Fence* pFence, uint64_t fenceValue)
 	{
-		if (pFence->GetCompletedValue() == fenceValue)
+		if (pFence->GetCompletedValue() >= fenceValue)
 			return;
 
 		HANDLE eventHandle = CreateEventEx(nullptr, 0, 0, EVENT_ALL_ACCESS);
@@ -189,7 +198,7 @@ namespace Okay
 		swapChainDesc.SampleDesc.Quality = 0;
 
 		swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-		swapChainDesc.BufferCount = 2; // Temp
+		swapChainDesc.BufferCount = MAX_FRAMES_IN_FLIGHT;
 		swapChainDesc.OutputWindow = window.getHWND();
 		swapChainDesc.Windowed = true;
 
@@ -202,14 +211,14 @@ namespace Okay
 		m_pSwapChain = (IDXGISwapChain3*)pSwapChain;
 
 
-		for (uint32_t i = 0; i < 2; i++)
+		for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		{
-			DX_CHECK(m_pSwapChain->GetBuffer(i, IID_PPV_ARGS(&m_pBackBuffers[i])));
+			DX_CHECK(m_pSwapChain->GetBuffer(i, IID_PPV_ARGS(&m_frames[i].pBackBuffer)));
 
-			m_cpuBackBufferRTVs[i] = m_pRTVDescHeap->GetCPUDescriptorHandleForHeapStart();
-			m_cpuBackBufferRTVs[i].ptr += (uint64_t)i * m_rtvIncrementSize;
+			m_frames[i].cpuBackBufferRTV = m_pRTVDescHeap->GetCPUDescriptorHandleForHeapStart();
+			m_frames[i].cpuBackBufferRTV.ptr += (uint64_t)i * m_rtvIncrementSize;
 
-			m_pDevice->CreateRenderTargetView(m_pBackBuffers[i], nullptr, m_cpuBackBufferRTVs[i]);
+			m_pDevice->CreateRenderTargetView(m_frames[i].pBackBuffer, nullptr, m_frames[i].cpuBackBufferRTV);
 		}
 	}
 
