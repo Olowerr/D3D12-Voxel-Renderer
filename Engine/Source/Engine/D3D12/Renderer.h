@@ -1,6 +1,6 @@
 #pragma once
-#include "OkayD3D12.h"
 #include "Engine/Application/Window.h"
+#include "RingBuffer.h"
 
 namespace Okay
 {
@@ -14,6 +14,8 @@ namespace Okay
 		
 		ID3D12Resource* pBackBuffer = {};
 		D3D12_CPU_DESCRIPTOR_HANDLE cpuBackBufferRTV = {};
+
+		RingBuffer ringBuffer;
 	};
 
 	class Renderer

@@ -29,6 +29,9 @@ namespace Okay
 
 			DX_CHECK(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&frame.pFence)));
 			frame.fenceValue = 0;
+
+			frame.ringBuffer.initialize(m_pDevice, D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
+			frame.ringBuffer.map();
 		}
 	
 
@@ -38,7 +41,17 @@ namespace Okay
 	void Renderer::shutdown()
 	{
 		for (FrameResources& frame : m_frames)
+		{
 			wait(frame.pFence, frame.fenceValue);
+
+			D3D12_RELEASE(frame.pFence);
+			D3D12_RELEASE(frame.pCommandAllocator);
+			D3D12_RELEASE(frame.pCommandList);
+			D3D12_RELEASE(frame.pBackBuffer);
+
+			frame.ringBuffer.unmap();
+			frame.ringBuffer.shutdown();
+		}
 
 		D3D12_RELEASE(m_pDevice);
 		D3D12_RELEASE(m_pCommandQueue);
@@ -48,13 +61,6 @@ namespace Okay
 		D3D12_RELEASE(m_pVoxelPSO);
 
 		D3D12_RELEASE(m_pRTVDescHeap);
-		for (FrameResources& frame : m_frames)
-		{
-			D3D12_RELEASE(frame.pFence);
-			D3D12_RELEASE(frame.pCommandAllocator);
-			D3D12_RELEASE(frame.pCommandList);
-			D3D12_RELEASE(frame.pBackBuffer);
-		}
 	}
 
 	void Renderer::render()

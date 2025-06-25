@@ -12,6 +12,11 @@ namespace Okay
 {
 	inline const FilePath SHADER_PATH = FilePath("..") / "Engine" / "resources" / "shaders";;
 
+	constexpr uint64_t alignUint64(uint64_t value, uint32_t alignment)
+	{
+		return ((value - 1) - ((value - 1) % alignment)) + alignment;
+	}
+
 	inline D3D12_SHADER_BYTECODE compileShader(FilePath path, std::string_view version, ID3DBlob** pShaderBlob)
 	{
 		ID3DBlob* pErrorBlob = nullptr;
