@@ -1,7 +1,14 @@
 #include "Renderer.h"
+#include "Engine/Application/Window.h"
+#include "Engine/World/World.h"
 
 namespace Okay
 {
+	struct RenderData
+	{
+		glm::mat4 viewProjMatrix = glm::mat4(1.f);
+	};
+
 	void Renderer::initialize(const Window& window)
 	{
 #ifdef _DEBUG
@@ -63,20 +70,34 @@ namespace Okay
 		D3D12_RELEASE(m_pRTVDescHeap);
 	}
 
-	void Renderer::render()
+	void Renderer::render(const World& world)
 	{
+		FrameResources& frame = m_frames[m_pSwapChain->GetCurrentBackBufferIndex()];
+		wait(frame.pFence, frame.fenceValue);
+		reset(frame.pCommandAllocator, frame.pCommandList);
+
+		frame.ringBuffer.jumpToStart();
+
+		updateBuffers(world);
 		preRender();
 		renderWorld();
 		postRender();
 	}
 
+	void Renderer::updateBuffers(const World& world)
+	{
+		const Camera& camera = world.getCameraConst();
+
+		RenderData renderData = {};
+		renderData.viewProjMatrix = glm::transpose(camera.getProjectionMatrix(1600.f, 900.f) * camera.transform.getViewMatrix());
+
+		FrameResources& frame = m_frames[m_pSwapChain->GetCurrentBackBufferIndex()];
+		m_renderDataGVA = frame.ringBuffer.allocate(&renderData, sizeof(renderData));
+	}
+
 	void Renderer::preRender()
 	{
 		FrameResources& frame = m_frames[m_pSwapChain->GetCurrentBackBufferIndex()];
-
-		wait(frame.pFence, frame.fenceValue);
-		reset(frame.pCommandAllocator, frame.pCommandList);
-
 		transitionResource(frame.pCommandList, frame.pBackBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
 		static const float CLEAR_COLOUR[4] = {0.4f, 0.3f, 0.7f, 0.f};
@@ -90,11 +111,11 @@ namespace Okay
 		frame.pCommandList->SetGraphicsRootSignature(m_pVoxelRootSignature);
 		frame.pCommandList->SetPipelineState(m_pVoxelPSO);
 
+		frame.pCommandList->SetGraphicsRootConstantBufferView(0, m_renderDataGVA);
+
 		frame.pCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		
 		frame.pCommandList->RSSetViewports(1, &m_viewport);
 		frame.pCommandList->RSSetScissorRects(1, &m_scissorRect);
-
 		frame.pCommandList->OMSetRenderTargets(1, &frame.cpuBackBufferRTV, false, nullptr);
 
 		frame.pCommandList->DrawInstanced(3, 1, 0, 0);
@@ -291,9 +312,12 @@ namespace Okay
 
 	void Renderer::createVoxelRenderPass()
 	{
+		std::vector<D3D12_ROOT_PARAMETER> rootParams;
+		rootParams.emplace_back(createRootParamCBV(D3D12_SHADER_VISIBILITY_ALL, 0, 0));
+
 		D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
-		rootDesc.NumParameters = 0;
-		rootDesc.pParameters = nullptr;
+		rootDesc.NumParameters = (uint32_t)rootParams.size();
+		rootDesc.pParameters = rootParams.data();
 		rootDesc.NumStaticSamplers = 0;
 		rootDesc.pStaticSamplers = nullptr;
 		rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
@@ -306,12 +330,9 @@ namespace Okay
 
 		D3D12_GRAPHICS_PIPELINE_STATE_DESC pipelineDesc = createDefaultGraphicsPipelineStateDesc();
 		pipelineDesc.pRootSignature = m_pVoxelRootSignature;
-
 		pipelineDesc.VS = compileShader(SHADER_PATH / "VertexShader.hlsl", "vs_5_1", &pShaderBlobs[shaderBlobIdx++]);
 		pipelineDesc.PS = compileShader(SHADER_PATH / "PixelShader.hlsl", "ps_5_1", &pShaderBlobs[shaderBlobIdx++]);
-
 		pipelineDesc.DepthStencilState.DepthEnable = false;
-
 		pipelineDesc.NumRenderTargets = 1;
 		pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
 

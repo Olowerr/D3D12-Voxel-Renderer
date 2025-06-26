@@ -1,7 +1,9 @@
 #pragma once
 
+#include "Window.h"
 #include "Engine/D3D12/Renderer.h"
 #include "Time.h"
+#include "Engine/World/World.h"
 
 namespace Okay
 {
@@ -18,6 +20,7 @@ namespace Okay
 
 	protected:
 		Window m_window;
+		World m_world;
 
 	private:
 		Renderer m_renderer;

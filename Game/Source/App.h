@@ -11,4 +11,7 @@ protected:
 	// Inherited via Application
 	void onUpdate(Okay::TimeStep dt) override;
 
+private:
+	void updateCamera(Okay::TimeStep dt);
+
 };

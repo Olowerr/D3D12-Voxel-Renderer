@@ -1,11 +1,7 @@
 
-struct PSInput
-{
-    float4 svPosition : SV_POSITION;
-    float4 color : COLOR;
-};
+#include "GPUShared.hlsli"
 
-float4 main(PSInput input) : SV_TARGET
+float4 main(VoxelVSOutput input) : SV_TARGET
 {
     return input.color;
 }

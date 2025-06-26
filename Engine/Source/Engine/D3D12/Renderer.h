@@ -1,9 +1,11 @@
 #pragma once
-#include "Engine/Application/Window.h"
 #include "RingBuffer.h"
 
 namespace Okay
 {
+	class Window;
+	class World;
+
 	struct FrameResources
 	{
 		uint64_t fenceValue = INVALID_UINT64;
@@ -30,9 +32,10 @@ namespace Okay
 		void initialize(const Window& window);
 		void shutdown();
 
-		void render();
+		void render(const World& world);
 
 	private:
+		void updateBuffers(const World& world);
 		void preRender();
 		void renderWorld();
 		void postRender();
@@ -71,6 +74,8 @@ namespace Okay
 
 		D3D12_VIEWPORT m_viewport = {};
 		D3D12_RECT m_scissorRect = {};
+
+		D3D12_GPU_VIRTUAL_ADDRESS m_renderDataGVA = INVALID_UINT64;
 
 	private:
 		uint32_t m_rtvIncrementSize = INVALID_UINT32;

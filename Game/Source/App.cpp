@@ -11,6 +11,8 @@ App::App()
 
 void App::onUpdate(TimeStep dt)
 {
+	updateCamera(dt);
+
 	static TimeStep passedTime = 0;
 	static uint32_t numFrames = 0;
 
@@ -27,4 +29,14 @@ void App::onUpdate(TimeStep dt)
 		windowTitle = "D3D12 Voxel Renderer | Fps: " + std::to_string((uint32_t)glm::round(1.f / averageFps));
 		m_window.setWindowTitle(windowTitle);
 	}
+}
+
+void App::updateCamera(TimeStep dt)
+{
+	Transform& camTransform = m_world.getCamera().transform;
+
+	camTransform.rotation.x = 20.f;
+	camTransform.rotation.y += 90.f * dt;
+
+	camTransform.position = camTransform.forwardVec() * -5.f;
 }

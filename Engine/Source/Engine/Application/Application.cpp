@@ -5,7 +5,6 @@ namespace Okay
 	Application::Application(std::string_view windowTitle, uint32_t windowWidth, uint32_t windowHeight)
 	{
 		glfwInitHint(GLFW_CLIENT_API, GLFW_NO_API);
-
 		bool glInit = glfwInit();
 		OKAY_ASSERT(glInit);
 
@@ -32,7 +31,7 @@ namespace Okay
 
 			onUpdate(timeStep);
 
-			m_renderer.render();
+			m_renderer.render(m_world);
 		}
 	}
 }

@@ -17,6 +17,34 @@ namespace Okay
 		return ((value - 1) - ((value - 1) % alignment)) + alignment;
 	}
 
+	class ShaderIncludeReader : public ID3DInclude
+	{
+	public:
+		// Inherited via ID3DInclude
+		virtual HRESULT __stdcall Open(D3D_INCLUDE_TYPE IncludeType, LPCSTR pFileName, LPCVOID pParentData, LPCVOID* ppData, UINT* pBytes) override
+		{
+			if (!Okay::readBinary(SHADER_PATH / pFileName, m_includeBuffer))
+			{
+				return E_FAIL;
+			}
+
+			*ppData = m_includeBuffer.c_str();
+			*pBytes = (uint32_t)m_includeBuffer.size();
+
+			return S_OK;
+		}
+
+		virtual HRESULT __stdcall Close(LPCVOID pData) override
+		{
+			m_includeBuffer.clear();
+			m_includeBuffer.shrink_to_fit();
+			return S_OK;
+		}
+
+	private:
+		std::string m_includeBuffer;
+	};
+
 	inline D3D12_SHADER_BYTECODE compileShader(FilePath path, std::string_view version, ID3DBlob** pShaderBlob)
 	{
 		ID3DBlob* pErrorBlob = nullptr;
@@ -27,7 +55,8 @@ namespace Okay
 		uint32_t flags1 = D3DCOMPILE_OPTIMIZATION_LEVEL2;
 #endif
 
-		HRESULT hr = D3DCompileFromFile(path.c_str(), nullptr, nullptr, "main", version.data(), flags1, 0, pShaderBlob, &pErrorBlob);
+		ShaderIncludeReader includeReader;
+		HRESULT hr = D3DCompileFromFile(path.c_str(), nullptr, &includeReader, "main", version.data(), flags1, 0, pShaderBlob, &pErrorBlob);
 
 		if (FAILED(hr))
 		{
@@ -49,6 +78,16 @@ namespace Okay
 		shaderByteCode.BytecodeLength = (*pShaderBlob)->GetBufferSize();
 
 		return shaderByteCode;
+	}
+
+	constexpr D3D12_ROOT_PARAMETER createRootParamCBV(D3D12_SHADER_VISIBILITY visibility, uint32_t shaderRegister, uint32_t registerSpace)
+	{
+		D3D12_ROOT_PARAMETER param = {};
+		param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+		param.ShaderVisibility = visibility;
+		param.Descriptor.ShaderRegister = shaderRegister;
+		param.Descriptor.RegisterSpace = registerSpace;
+		return param;
 	}
 
 	constexpr D3D12_BLEND_DESC createDefaultBlendDesc()
