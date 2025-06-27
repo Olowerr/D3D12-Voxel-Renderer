@@ -47,7 +47,9 @@ namespace Okay
 
 		void transitionResource(ID3D12GraphicsCommandList* pCommandList, ID3D12Resource* pResource, D3D12_RESOURCE_STATES beforeState, D3D12_RESOURCE_STATES newState);
 
-	private:
+		void updateDefaultHeapResource(ID3D12Resource* pTarget, uint64_t targetOffset, FrameResources& frame, void* pData, uint64_t dataSize);
+
+	private: // Creation
 		void enableDebugLayer();
 		void enableGPUBasedValidation();
 
@@ -55,9 +57,9 @@ namespace Okay
 		void createCommandQueue();
 		void createSwapChain(IDXGIFactory* pFactory, const Window& window);
 
-		void createDescriptorHeap(ID3D12DescriptorHeap** ppDescriptorHeap, D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors, bool shaderVisible);
-
-		void createRootSignature(const D3D12_ROOT_SIGNATURE_DESC* pDesc, ID3D12RootSignature** ppOutRootSignature);
+		ID3D12RootSignature* createRootSignature(const D3D12_ROOT_SIGNATURE_DESC* pDesc, std::wstring_view name);
+		ID3D12DescriptorHeap* createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors, bool shaderVisible, std::wstring_view name);
+		ID3D12Resource* createCommittedBuffer(uint64_t size, D3D12_RESOURCE_STATES initialState, D3D12_HEAP_TYPE heapType, std::wstring_view name);
 
 		void createVoxelRenderPass();
 
@@ -76,6 +78,8 @@ namespace Okay
 		D3D12_RECT m_scissorRect = {};
 
 		D3D12_GPU_VIRTUAL_ADDRESS m_renderDataGVA = INVALID_UINT64;
+
+		ID3D12Resource* m_pMeshResource = nullptr;
 
 	private:
 		uint32_t m_rtvIncrementSize = INVALID_UINT32;

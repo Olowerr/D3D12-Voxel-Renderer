@@ -27,6 +27,12 @@ namespace Okay
 	constexpr uint32_t INVALID_UINT32 = UINT32_MAX;
 	constexpr uint64_t INVALID_UINT64 = UINT64_MAX;
 
+	struct Vertex
+	{
+		glm::vec3 position;
+		glm::vec3 colour;
+	};
+
 	static bool readBinary(FilePath binPath, std::string& output)
 	{
 		std::ifstream reader(binPath.c_str(), std::ios::binary);

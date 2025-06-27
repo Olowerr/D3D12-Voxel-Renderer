@@ -3,5 +3,5 @@
 
 float4 main(VoxelVSOutput input) : SV_TARGET
 {
-    return input.color;
+    return float4(input.color, 0.f);
 }

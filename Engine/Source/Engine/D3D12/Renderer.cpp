@@ -23,7 +23,7 @@ namespace Okay
 		m_rtvIncrementSize = m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
 		createCommandQueue();
-		createDescriptorHeap(&m_pRTVDescHeap, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, MAX_FRAMES_IN_FLIGHT, false);
+		m_pRTVDescHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_RTV, MAX_FRAMES_IN_FLIGHT, false, L"BackBufferRTVDescriptorHeap");
 		createSwapChain(pFactory, window);
 
 		D3D12_RELEASE(pFactory);
@@ -38,11 +38,23 @@ namespace Okay
 			frame.fenceValue = 0;
 
 			frame.ringBuffer.initialize(m_pDevice, D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
-			frame.ringBuffer.map();
 		}
 	
 
 		createVoxelRenderPass();
+		m_pMeshResource = createCommittedBuffer(100'000, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_HEAP_TYPE_DEFAULT, L"MeshBuffer");
+
+		Vertex verticies[3] = 
+		{
+			{ glm::vec3(-0.5f, -0.5f, 0.f), glm::vec3(1.f, 0.f, 0.f) },
+			{ glm::vec3(0.f, 0.5f, 0.f), glm::vec3(0.f, 1.f, 0.f) },
+			{ glm::vec3(0.5f, -0.5f, 0.f), glm::vec3(0.f, 0.f, 1.f) },
+		};
+
+		reset(m_frames[0].pCommandAllocator, m_frames[0].pCommandList);
+		updateDefaultHeapResource(m_pMeshResource, 0, m_frames[0], verticies, sizeof(verticies));
+		execute(m_frames[0].pCommandList);
+		signal(m_frames[0].pFence, m_frames[0].fenceValue);
 	}
 
 	void Renderer::shutdown()
@@ -56,7 +68,6 @@ namespace Okay
 			D3D12_RELEASE(frame.pCommandList);
 			D3D12_RELEASE(frame.pBackBuffer);
 
-			frame.ringBuffer.unmap();
 			frame.ringBuffer.shutdown();
 		}
 
@@ -66,6 +77,7 @@ namespace Okay
 
 		D3D12_RELEASE(m_pVoxelRootSignature);
 		D3D12_RELEASE(m_pVoxelPSO);
+		D3D12_RELEASE(m_pMeshResource);
 
 		D3D12_RELEASE(m_pRTVDescHeap);
 	}
@@ -77,11 +89,14 @@ namespace Okay
 		reset(frame.pCommandAllocator, frame.pCommandList);
 
 		frame.ringBuffer.jumpToStart();
+		frame.ringBuffer.map();
 
 		updateBuffers(world);
 		preRender();
 		renderWorld();
 		postRender();
+
+		frame.ringBuffer.unmap();
 	}
 
 	void Renderer::updateBuffers(const World& world)
@@ -112,6 +127,7 @@ namespace Okay
 		frame.pCommandList->SetPipelineState(m_pVoxelPSO);
 
 		frame.pCommandList->SetGraphicsRootConstantBufferView(0, m_renderDataGVA);
+		frame.pCommandList->SetGraphicsRootShaderResourceView(1, m_pMeshResource->GetGPUVirtualAddress());
 
 		frame.pCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		frame.pCommandList->RSSetViewports(1, &m_viewport);
@@ -173,6 +189,20 @@ namespace Okay
 		barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
 
 		pCommandList->ResourceBarrier(1, &barrier);
+	}
+
+	void Renderer::updateDefaultHeapResource(ID3D12Resource* pTarget, uint64_t targetOffset, FrameResources& frame, void* pData, uint64_t dataSize)
+	{
+		bool mapped = frame.ringBuffer.getMappedPtr();
+		if (!mapped)
+			frame.ringBuffer.map();
+
+		uint64_t uploadBufferOffset = frame.ringBuffer.getOffset();
+		frame.ringBuffer.allocate(pData, dataSize);
+		frame.pCommandList->CopyBufferRegion(pTarget, targetOffset, frame.ringBuffer.getDXResource(), uploadBufferOffset, dataSize);
+
+		if (!mapped)
+			frame.ringBuffer.unmap();
 	}
 
 	void Renderer::enableDebugLayer()
@@ -281,7 +311,7 @@ namespace Okay
 		}
 	}
 
-	void Renderer::createDescriptorHeap(ID3D12DescriptorHeap** ppDescriptorHeap, D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors, bool shaderVisible)
+	ID3D12DescriptorHeap* Renderer::createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors, bool shaderVisible, std::wstring_view name)
 	{
 		D3D12_DESCRIPTOR_HEAP_DESC descHeapDesc = {};
 		descHeapDesc.NodeMask = 0;
@@ -289,10 +319,43 @@ namespace Okay
 		descHeapDesc.NumDescriptors = numDescriptors;
 		descHeapDesc.Flags = shaderVisible ? D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE : D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 
-		DX_CHECK(m_pDevice->CreateDescriptorHeap(&descHeapDesc, IID_PPV_ARGS(ppDescriptorHeap)));
+		ID3D12DescriptorHeap* pDescriptorHeap = nullptr;
+		DX_CHECK(m_pDevice->CreateDescriptorHeap(&descHeapDesc, IID_PPV_ARGS(&pDescriptorHeap)));
+
+		pDescriptorHeap->SetName(name.data());
+		return pDescriptorHeap;
 	}
 
-	void Renderer::createRootSignature(const D3D12_ROOT_SIGNATURE_DESC* pDesc, ID3D12RootSignature** ppOutRootSignature)
+	ID3D12Resource* Renderer::createCommittedBuffer(uint64_t size, D3D12_RESOURCE_STATES initialState, D3D12_HEAP_TYPE heapType, std::wstring_view name)
+	{
+		D3D12_RESOURCE_DESC desc = {};
+		desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+		desc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+		desc.Width = size;
+		desc.Height = 1;
+		desc.DepthOrArraySize = 1;
+		desc.MipLevels = 1;
+		desc.Format = DXGI_FORMAT_UNKNOWN;
+		desc.SampleDesc.Count = 1;
+		desc.SampleDesc.Quality = 0;
+		desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+		desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+		D3D12_HEAP_PROPERTIES heapProperties = {};
+		heapProperties.Type = heapType;
+		heapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+		heapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+		heapProperties.CreationNodeMask = 0;
+		heapProperties.VisibleNodeMask = 0;
+
+		ID3D12Resource* pResource = nullptr;
+		DX_CHECK(m_pDevice->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &desc, initialState, nullptr, IID_PPV_ARGS(&pResource)));
+
+		pResource->SetName(name.data());
+		return pResource;
+	}
+
+	ID3D12RootSignature* Renderer::createRootSignature(const D3D12_ROOT_SIGNATURE_DESC* pDesc, std::wstring_view name)
 	{
 		ID3DBlob* pRootBlob = nullptr;
 		ID3DBlob* pErrorBlob = nullptr;
@@ -304,16 +367,22 @@ namespace Okay
 			OKAY_ASSERT(false);
 		}
 
-		DX_CHECK(m_pDevice->CreateRootSignature(0, pRootBlob->GetBufferPointer(), pRootBlob->GetBufferSize(), IID_PPV_ARGS(ppOutRootSignature)));
+		ID3D12RootSignature* pRootSignature = nullptr;
+		DX_CHECK(m_pDevice->CreateRootSignature(0, pRootBlob->GetBufferPointer(), pRootBlob->GetBufferSize(), IID_PPV_ARGS(&pRootSignature)));
+
+		pRootSignature->SetName(name.data());
 
 		D3D12_RELEASE(pRootBlob);
 		D3D12_RELEASE(pErrorBlob);
+
+		return pRootSignature;
 	}
 
 	void Renderer::createVoxelRenderPass()
 	{
 		std::vector<D3D12_ROOT_PARAMETER> rootParams;
 		rootParams.emplace_back(createRootParamCBV(D3D12_SHADER_VISIBILITY_ALL, 0, 0));
+		rootParams.emplace_back(createRootParamSRV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0));
 
 		D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
 		rootDesc.NumParameters = (uint32_t)rootParams.size();
@@ -322,7 +391,7 @@ namespace Okay
 		rootDesc.pStaticSamplers = nullptr;
 		rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
 
-		createRootSignature(&rootDesc, &m_pVoxelRootSignature);
+		m_pVoxelRootSignature = createRootSignature(&rootDesc, L"VoxelRootSignature");
 
 
 		ID3DBlob* pShaderBlobs[5] = {};

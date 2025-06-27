@@ -90,6 +90,16 @@ namespace Okay
 		return param;
 	}
 
+	constexpr D3D12_ROOT_PARAMETER createRootParamSRV(D3D12_SHADER_VISIBILITY visibility, uint32_t shaderRegister, uint32_t registerSpace)
+	{
+		D3D12_ROOT_PARAMETER param = {};
+		param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+		param.ShaderVisibility = visibility;
+		param.Descriptor.ShaderRegister = shaderRegister;
+		param.Descriptor.RegisterSpace = registerSpace;
+		return param;
+	}
+
 	constexpr D3D12_BLEND_DESC createDefaultBlendDesc()
 	{
 		D3D12_BLEND_DESC desc = {};

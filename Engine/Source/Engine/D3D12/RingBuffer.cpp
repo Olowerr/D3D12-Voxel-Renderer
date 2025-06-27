@@ -73,6 +73,8 @@ namespace Okay
 
 	void RingBuffer::unmap()
 	{
+		OKAY_ASSERT(m_pMappedPtr);
+
 		D3D12_RANGE writeRange = { 0, 0 };
 		m_pRingBuffer->Unmap(0, &writeRange);
 
