@@ -104,7 +104,7 @@ namespace Okay
 		const Camera& camera = world.getCameraConst();
 
 		RenderData renderData = {};
-		renderData.viewProjMatrix = glm::transpose(camera.getProjectionMatrix(1600.f, 900.f) * camera.transform.getViewMatrix());
+		renderData.viewProjMatrix = glm::transpose(camera.getProjectionMatrix(m_viewport.Width, m_viewport.Height) * camera.transform.getViewMatrix());
 
 		FrameResources& frame = m_frames[m_pSwapChain->GetCurrentBackBufferIndex()];
 		m_renderDataGVA = frame.ringBuffer.allocate(&renderData, sizeof(renderData));
