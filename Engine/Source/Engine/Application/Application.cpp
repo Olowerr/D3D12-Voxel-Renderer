@@ -22,6 +22,8 @@ namespace Okay
 	{
 		Timer frameTimer;
 
+		m_renderer.updateChunkData(m_world.getChunkConst());
+
 		while (m_window.isOpen())
 		{
 			TimeStep timeStep = frameTimer.measure();

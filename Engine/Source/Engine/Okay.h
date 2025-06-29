@@ -29,8 +29,13 @@ namespace Okay
 
 	struct Vertex
 	{
-		glm::vec3 position;
-		glm::vec3 colour;
+		Vertex() = default;
+		Vertex(const glm::vec3& position)
+			:position(position)
+		{ }
+
+		glm::vec3 position = glm::vec3(0.f);
+		glm::vec3 colour = glm::vec3(0.f);
 	};
 
 	static bool readBinary(FilePath binPath, std::string& output)

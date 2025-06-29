@@ -37,24 +37,12 @@ namespace Okay
 			DX_CHECK(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&frame.pFence)));
 			frame.fenceValue = 0;
 
-			frame.ringBuffer.initialize(m_pDevice, D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
+			frame.ringBuffer.initialize(m_pDevice, 10'000'000);
 		}
 	
 
 		createVoxelRenderPass();
-		m_pMeshResource = createCommittedBuffer(100'000, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_HEAP_TYPE_DEFAULT, L"MeshBuffer");
-
-		Vertex verticies[3] = 
-		{
-			{ glm::vec3(-0.5f, -0.5f, 0.f), glm::vec3(1.f, 0.f, 0.f) },
-			{ glm::vec3(0.f, 0.5f, 0.f), glm::vec3(0.f, 1.f, 0.f) },
-			{ glm::vec3(0.5f, -0.5f, 0.f), glm::vec3(0.f, 0.f, 1.f) },
-		};
-
-		reset(m_frames[0].pCommandAllocator, m_frames[0].pCommandList);
-		updateDefaultHeapResource(m_pMeshResource, 0, m_frames[0], verticies, sizeof(verticies));
-		execute(m_frames[0].pCommandList);
-		signal(m_frames[0].pFence, m_frames[0].fenceValue);
+		m_pMeshResource = createCommittedBuffer(10'000'000, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_HEAP_TYPE_DEFAULT, L"MeshBuffer");
 	}
 
 	void Renderer::shutdown()
@@ -99,6 +87,17 @@ namespace Okay
 		frame.ringBuffer.unmap();
 	}
 
+	void Renderer::updateChunkData(const Chunk& chunk)
+	{
+		// Temp
+
+		reset(m_frames[0].pCommandAllocator, m_frames[0].pCommandList);
+		writeChunkDataToGPU(chunk, m_frames[0]);
+
+		execute(m_frames[0].pCommandList);
+		signal(m_frames[0].pFence, m_frames[0].fenceValue);
+	}
+
 	void Renderer::updateBuffers(const World& world)
 	{
 		const Camera& camera = world.getCameraConst();
@@ -134,7 +133,8 @@ namespace Okay
 		frame.pCommandList->RSSetScissorRects(1, &m_scissorRect);
 		frame.pCommandList->OMSetRenderTargets(1, &frame.cpuBackBufferRTV, false, nullptr);
 
-		frame.pCommandList->DrawInstanced(3, 1, 0, 0);
+		// 36 temp
+		frame.pCommandList->DrawInstanced(MAX_BLOCKS_IN_CHUNK * 36, 1, 0, 0);
 	}
 
 	void Renderer::postRender()
@@ -203,6 +203,81 @@ namespace Okay
 
 		if (!mapped)
 			frame.ringBuffer.unmap();
+	}
+
+	void Renderer::writeChunkDataToGPU(const Chunk& chunk, FrameResources& frame)
+	{
+		std::vector<Vertex> meshData;
+		meshData.reserve(MAX_BLOCKS_IN_CHUNK * 36ull); // 36 verticies in a cube (without indices)
+
+		for (uint32_t i = 0; i < MAX_BLOCKS_IN_CHUNK; i++)
+		{
+			if (chunk.blocks[i] == 0)
+				continue;
+			
+			glm::vec3 chunkCoord = Chunk::blockIdxToChunkCoord(i);
+
+			// Top
+			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 0.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 1.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 1.f));
+
+			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 1.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 0.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 0.f));
+
+			// Bottom
+			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 1.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 1.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 0.f));
+
+			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 0.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 0.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 1.f));
+
+			// Right
+			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 0.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 1.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 1.f));
+
+			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 0.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 1.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 0.f));
+
+			// Left
+			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 1.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 1.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 0.f));
+
+			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 0.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 1.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 0.f));
+
+			// Forward
+			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 1.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 1.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 1.f));
+
+			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 1.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 1.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 1.f));
+
+			// Backward
+			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 0.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 0.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 0.f));
+
+			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 0.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 0.f));
+			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 0.f));
+
+		}
+
+		// DBG
+		for (Vertex& vertex : meshData)
+			vertex.colour = glm::vec3(rand() / (float)RAND_MAX, rand() / (float)RAND_MAX, rand() / (float)RAND_MAX);
+
+		updateDefaultHeapResource(m_pMeshResource, 0, frame, meshData.data(), meshData.size() * sizeof(Vertex));
 	}
 
 	void Renderer::enableDebugLayer()

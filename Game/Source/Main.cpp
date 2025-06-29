@@ -3,6 +3,8 @@
 
 int main()
 {
+	srand((uint32_t)time(nullptr));
+
 	App voxelWorld;
 	voxelWorld.run();
 

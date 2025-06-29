@@ -33,10 +33,20 @@ void App::onUpdate(TimeStep dt)
 
 void App::updateCamera(TimeStep dt)
 {
+	static float camXRotDir = 1.f;
+
 	Transform& camTransform = m_world.getCamera().transform;
 
-	camTransform.rotation.x = 20.f;
 	camTransform.rotation.y += 90.f * dt;
 
-	camTransform.position = camTransform.forwardVec() * -5.f;
+	camTransform.rotation.x += 30.f * camXRotDir * dt;
+	if (camTransform.rotation.x > 45.f || camTransform.rotation.x < -45.f)
+	{
+		camXRotDir *= -1.f;
+		camTransform.rotation.x = glm::clamp(camTransform.rotation.x, -45.f, 45.f);
+	}
+
+	camTransform.position = camTransform.forwardVec() * -32.f;
+	camTransform.position += glm::vec3(CHUNK_WIDTH * 0.5f, WORLD_HEIGHT * 0.5f, CHUNK_WIDTH * 0.5f);
+
 }

@@ -5,6 +5,7 @@ namespace Okay
 {
 	class Window;
 	class World;
+	struct Chunk;
 
 	struct FrameResources
 	{
@@ -33,6 +34,7 @@ namespace Okay
 		void shutdown();
 
 		void render(const World& world);
+		void updateChunkData(const Chunk& chunk); // takes in ChunkID later too
 
 	private:
 		void updateBuffers(const World& world);
@@ -48,6 +50,7 @@ namespace Okay
 		void transitionResource(ID3D12GraphicsCommandList* pCommandList, ID3D12Resource* pResource, D3D12_RESOURCE_STATES beforeState, D3D12_RESOURCE_STATES newState);
 
 		void updateDefaultHeapResource(ID3D12Resource* pTarget, uint64_t targetOffset, FrameResources& frame, void* pData, uint64_t dataSize);
+		void writeChunkDataToGPU(const Chunk& chunk, FrameResources& frame);
 
 	private: // Creation
 		void enableDebugLayer();
