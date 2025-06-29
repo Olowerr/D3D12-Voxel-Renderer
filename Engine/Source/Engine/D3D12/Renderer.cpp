@@ -20,12 +20,14 @@ namespace Okay
 		DX_CHECK(CreateDXGIFactory(IID_PPV_ARGS(&pFactory)));
 
 		createDevice(pFactory);
-		m_rtvIncrementSize = m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-
 		createCommandQueue();
-		m_pRTVDescHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_RTV, MAX_FRAMES_IN_FLIGHT, false, L"BackBufferRTVDescriptorHeap");
-		createSwapChain(pFactory, window);
 
+		m_pRTVDescHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_RTV, MAX_FRAMES_IN_FLIGHT, false, L"BackBufferRTVDescriptorHeap");
+		m_pDSVDescHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_DSV, MAX_FRAMES_IN_FLIGHT, false, L"DepthTextureDSVDescriptorHeap");
+		m_rtvIncrementSize = m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+		m_dsvIncrementSize = m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+
+		createSwapChain(pFactory, window);
 		D3D12_RELEASE(pFactory);
 
 		for (FrameResources& frame : m_frames)
@@ -55,6 +57,7 @@ namespace Okay
 			D3D12_RELEASE(frame.pCommandAllocator);
 			D3D12_RELEASE(frame.pCommandList);
 			D3D12_RELEASE(frame.pBackBuffer);
+			D3D12_RELEASE(frame.pDepthTexture);
 
 			frame.ringBuffer.shutdown();
 		}
@@ -68,6 +71,7 @@ namespace Okay
 		D3D12_RELEASE(m_pMeshResource);
 
 		D3D12_RELEASE(m_pRTVDescHeap);
+		D3D12_RELEASE(m_pDSVDescHeap);
 	}
 
 	void Renderer::render(const World& world)
@@ -116,6 +120,7 @@ namespace Okay
 
 		static const float CLEAR_COLOUR[4] = {0.4f, 0.3f, 0.7f, 0.f};
 		frame.pCommandList->ClearRenderTargetView(frame.cpuBackBufferRTV, CLEAR_COLOUR, 0, nullptr);
+		frame.pCommandList->ClearDepthStencilView(frame.cpuDepthTextureDSV, D3D12_CLEAR_FLAG_DEPTH, 1.f, 0, 0, nullptr);
 	}
 
 	void Renderer::renderWorld()
@@ -131,7 +136,7 @@ namespace Okay
 		frame.pCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		frame.pCommandList->RSSetViewports(1, &m_viewport);
 		frame.pCommandList->RSSetScissorRects(1, &m_scissorRect);
-		frame.pCommandList->OMSetRenderTargets(1, &frame.cpuBackBufferRTV, false, nullptr);
+		frame.pCommandList->OMSetRenderTargets(1, &frame.cpuBackBufferRTV, false, &frame.cpuDepthTextureDSV);
 
 		// 36 temp
 		frame.pCommandList->DrawInstanced(MAX_BLOCKS_IN_CHUNK * 36, 1, 0, 0);
@@ -360,28 +365,57 @@ namespace Okay
 
 		for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		{
-			DX_CHECK(m_pSwapChain->GetBuffer(i, IID_PPV_ARGS(&m_frames[i].pBackBuffer)));
+			FrameResources& frame = m_frames[i];
 
-			m_frames[i].cpuBackBufferRTV = m_pRTVDescHeap->GetCPUDescriptorHandleForHeapStart();
-			m_frames[i].cpuBackBufferRTV.ptr += (uint64_t)i * m_rtvIncrementSize;
 
-			m_pDevice->CreateRenderTargetView(m_frames[i].pBackBuffer, nullptr, m_frames[i].cpuBackBufferRTV);
+			// Back Buffer
+			DX_CHECK(m_pSwapChain->GetBuffer(i, IID_PPV_ARGS(&frame.pBackBuffer)));
 
+			frame.cpuBackBufferRTV = m_pRTVDescHeap->GetCPUDescriptorHandleForHeapStart();
+			frame.cpuBackBufferRTV.ptr += (uint64_t)i * m_rtvIncrementSize;
+
+			m_pDevice->CreateRenderTargetView(frame.pBackBuffer, nullptr, frame.cpuBackBufferRTV);
+
+
+			// Depth
+			D3D12_RESOURCE_DESC textureDesc = frame.pBackBuffer->GetDesc();
+			textureDesc.Format = DXGI_FORMAT_D32_FLOAT;
+			textureDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+			D3D12_HEAP_PROPERTIES heapProperties = {};
+			heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+			heapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+			heapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+			heapProperties.CreationNodeMask = 0;
+			heapProperties.VisibleNodeMask = 0;
+
+			D3D12_CLEAR_VALUE clearValue = {};
+			clearValue.Format = textureDesc.Format;
+			clearValue.DepthStencil.Depth = 1.f;
+			clearValue.DepthStencil.Stencil = 0;
+
+			DX_CHECK(m_pDevice->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &textureDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &clearValue, IID_PPV_ARGS(&frame.pDepthTexture)));
+
+			frame.cpuDepthTextureDSV = m_pDSVDescHeap->GetCPUDescriptorHandleForHeapStart();
+			frame.cpuDepthTextureDSV.ptr += (uint64_t)i * m_dsvIncrementSize;
+
+			m_pDevice->CreateDepthStencilView(frame.pDepthTexture, nullptr, frame.cpuDepthTextureDSV);
+
+
+			// Viewport & ScissorRect
 			if (i == 0)
 			{
-				D3D12_RESOURCE_DESC backBufferDesc = m_frames[i].pBackBuffer->GetDesc();
-
 				m_viewport.TopLeftX = 0;
 				m_viewport.TopLeftY = 0;
-				m_viewport.Width = (float)backBufferDesc.Width;
-				m_viewport.Height = (float)backBufferDesc.Height;
+				m_viewport.Width = (float)textureDesc.Width;
+				m_viewport.Height = (float)textureDesc.Height;
 				m_viewport.MinDepth = 0.f;
 				m_viewport.MaxDepth = 1.f;
 
 				m_scissorRect.left = 0;
 				m_scissorRect.top = 0;
-				m_scissorRect.right = (LONG)backBufferDesc.Width;
-				m_scissorRect.bottom = (LONG)backBufferDesc.Height;
+				m_scissorRect.right = (LONG)textureDesc.Width;
+				m_scissorRect.bottom = (LONG)textureDesc.Height;
 			}
 		}
 	}
@@ -476,9 +510,9 @@ namespace Okay
 		pipelineDesc.pRootSignature = m_pVoxelRootSignature;
 		pipelineDesc.VS = compileShader(SHADER_PATH / "VertexShader.hlsl", "vs_5_1", &pShaderBlobs[shaderBlobIdx++]);
 		pipelineDesc.PS = compileShader(SHADER_PATH / "PixelShader.hlsl", "ps_5_1", &pShaderBlobs[shaderBlobIdx++]);
-		pipelineDesc.DepthStencilState.DepthEnable = false;
 		pipelineDesc.NumRenderTargets = 1;
 		pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+		pipelineDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 
 		DX_CHECK(m_pDevice->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_pVoxelPSO)));
 

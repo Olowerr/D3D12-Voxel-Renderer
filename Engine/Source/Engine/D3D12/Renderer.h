@@ -15,8 +15,11 @@ namespace Okay
 		ID3D12CommandAllocator* pCommandAllocator = nullptr;
 		ID3D12GraphicsCommandList* pCommandList = nullptr;
 		
-		ID3D12Resource* pBackBuffer = {};
+		ID3D12Resource* pBackBuffer = nullptr;
 		D3D12_CPU_DESCRIPTOR_HANDLE cpuBackBufferRTV = {};
+
+		ID3D12Resource* pDepthTexture = nullptr;
+		D3D12_CPU_DESCRIPTOR_HANDLE cpuDepthTextureDSV = {};
 
 		RingBuffer ringBuffer;
 	};
@@ -72,6 +75,7 @@ namespace Okay
 		IDXGISwapChain3* m_pSwapChain = nullptr;
 
 		ID3D12DescriptorHeap* m_pRTVDescHeap = nullptr;
+		ID3D12DescriptorHeap* m_pDSVDescHeap = nullptr;
 		FrameResources m_frames[MAX_FRAMES_IN_FLIGHT] = {};
 
 		ID3D12RootSignature* m_pVoxelRootSignature = nullptr;
@@ -86,5 +90,6 @@ namespace Okay
 
 	private:
 		uint32_t m_rtvIncrementSize = INVALID_UINT32;
+		uint32_t m_dsvIncrementSize = INVALID_UINT32;
 	};
 }
