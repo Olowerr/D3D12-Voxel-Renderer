@@ -5,19 +5,21 @@
 
 namespace Okay
 {
-	constexpr uint32_t WORLD_HEIGHT = 16;
+	constexpr uint32_t WORLD_HEIGHT = 256;
 	constexpr uint32_t CHUNK_WIDTH = 16;
 	constexpr uint32_t MAX_BLOCKS_IN_CHUNK = CHUNK_WIDTH * CHUNK_WIDTH * WORLD_HEIGHT;
 
-	struct Chunk
-	{
-		// Chunk block coordinate system order: X -> Y -> Z
+	constexpr glm::uvec3 RIGHT_DIR = glm::uvec3(1, 0, 0);
+	constexpr glm::uvec3 UP_DIR = glm::uvec3(0, 1, 0);
+	constexpr glm::uvec3 FORWARD_DIR = glm::uvec3(0, 0, 1);
 
+	struct Chunk // Chunk block coordinate system order: X -> Y -> Z
+	{
 		uint32_t blocks[MAX_BLOCKS_IN_CHUNK] = {};
 
-		static uint32_t chunkCoordToBlockIdx(const glm::uvec3& blockCoord)
+		static uint32_t chunkCoordToBlockIdx(const glm::uvec3& chunkCoord)
 		{
-			return blockCoord.x + blockCoord.y * CHUNK_WIDTH + blockCoord.z * CHUNK_WIDTH * WORLD_HEIGHT;
+			return chunkCoord.x + chunkCoord.y * CHUNK_WIDTH + chunkCoord.z * CHUNK_WIDTH * WORLD_HEIGHT;
 		}
 
 		static glm::uvec3 blockIdxToChunkCoord(uint32_t i)
@@ -28,6 +30,11 @@ namespace Okay
 			chunkCoord.z = i / (CHUNK_WIDTH * WORLD_HEIGHT);
 
 			return chunkCoord;
+		}
+
+		static bool isCoordInsideChunk(const glm::uvec3& chunkCoord)
+		{
+			return chunkCoord.x < CHUNK_WIDTH && chunkCoord.y < WORLD_HEIGHT && chunkCoord.z < CHUNK_WIDTH;
 		}
 	};
 

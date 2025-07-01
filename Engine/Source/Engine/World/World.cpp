@@ -4,8 +4,11 @@ namespace Okay
 {
 	World::World()
 	{
-		for (uint32_t& block : m_testChunk.blocks)
-			block = 1;
+		for (uint32_t i = 0; i < MAX_BLOCKS_IN_CHUNK; i++)
+		{
+			glm::uvec3 chunkCoord = Chunk::blockIdxToChunkCoord(i);
+			m_testChunk.blocks[i] = i % 2;
+		}
 	}
 
 	World::~World()

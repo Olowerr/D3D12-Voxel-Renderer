@@ -39,12 +39,12 @@ namespace Okay
 			DX_CHECK(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&frame.pFence)));
 			frame.fenceValue = 0;
 
-			frame.ringBuffer.initialize(m_pDevice, 10'000'000);
+			frame.ringBuffer.initialize(m_pDevice, 100'000'000);
 		}
 	
 
 		createVoxelRenderPass();
-		m_pMeshResource = createCommittedBuffer(10'000'000, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_HEAP_TYPE_DEFAULT, L"MeshBuffer");
+		m_pMeshResource = createCommittedBuffer(100'000'000, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_HEAP_TYPE_DEFAULT, L"MeshBuffer");
 	}
 
 	void Renderer::shutdown()
@@ -210,6 +210,11 @@ namespace Okay
 			frame.ringBuffer.unmap();
 	}
 
+	static bool isChunkCoordOccupied(const Chunk& chunk, const glm::uvec3& coord)
+	{
+		return Chunk::isCoordInsideChunk(coord) && chunk.blocks[Chunk::chunkCoordToBlockIdx(coord)] != 0;
+	}
+
 	void Renderer::writeChunkDataToGPU(const Chunk& chunk, FrameResources& frame)
 	{
 		std::vector<Vertex> meshData;
@@ -221,66 +226,85 @@ namespace Okay
 				continue;
 			
 			glm::vec3 chunkCoord = Chunk::blockIdxToChunkCoord(i);
+			glm::uvec3 chunkCoordUVec = chunkCoord;
 
 			// Top
-			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 0.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 1.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 1.f));
+			if (!isChunkCoordOccupied(chunk, chunkCoordUVec + UP_DIR))
+			{
+				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 0.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 1.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 1.f));
 
-			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 1.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 0.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 0.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 1.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 0.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 0.f));
+			}
 
 			// Bottom
-			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 1.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 1.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 0.f));
+			if (!isChunkCoordOccupied(chunk, chunkCoordUVec - UP_DIR))
+			{
+				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 1.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 1.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 0.f));
 
-			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 0.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 0.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 1.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 0.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 0.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 1.f));
+			}
 
 			// Right
-			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 0.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 1.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 1.f));
+			if (!isChunkCoordOccupied(chunk, chunkCoordUVec + RIGHT_DIR))
+			{
+				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 0.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 1.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 1.f));
 
-			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 0.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 1.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 0.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 0.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 1.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 0.f));
+			}
 
 			// Left
-			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 1.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 1.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 0.f));
+			if (!isChunkCoordOccupied(chunk, chunkCoordUVec - RIGHT_DIR))
+			{
+				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 1.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 1.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 0.f));
 
-			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 0.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 1.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 0.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 0.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 1.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 0.f));
+			}
 
 			// Forward
-			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 1.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 1.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 1.f));
+			if (!isChunkCoordOccupied(chunk, chunkCoordUVec + FORWARD_DIR))
+			{
+				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 1.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 1.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 1.f));
 
-			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 1.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 1.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 1.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 1.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 1.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 1.f));
+			}
 
 			// Backward
-			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 0.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 0.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 0.f));
+			if (!isChunkCoordOccupied(chunk, chunkCoordUVec - FORWARD_DIR))
+			{
+				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 0.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 0.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 0.f));
 
-			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 0.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 0.f));
-			meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 0.f));
-
+				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 0.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 0.f));
+				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 0.f));
+			}
 		}
 
 		// DBG
 		for (Vertex& vertex : meshData)
 			vertex.colour = glm::vec3(rand() / (float)RAND_MAX, rand() / (float)RAND_MAX, rand() / (float)RAND_MAX);
+
 
 		updateDefaultHeapResource(m_pMeshResource, 0, frame, meshData.data(), meshData.size() * sizeof(Vertex));
 	}
