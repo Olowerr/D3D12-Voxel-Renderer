@@ -9,6 +9,18 @@ namespace Okay
 		glm::mat4 viewProjMatrix = glm::mat4(1.f);
 	};
 
+	struct Vertex
+	{
+		Vertex() = default;
+		Vertex(const glm::vec3& position)
+			:position(position)
+		{
+		}
+
+		glm::vec3 position = glm::vec3(0.f);
+		glm::vec3 colour = glm::vec3(0.f);
+	};
+
 	void Renderer::initialize(const Window& window)
 	{
 #ifdef _DEBUG
@@ -39,12 +51,13 @@ namespace Okay
 			DX_CHECK(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&frame.pFence)));
 			frame.fenceValue = 0;
 
-			frame.ringBuffer.initialize(m_pDevice, 100'000'000);
+			frame.ringBuffer.initialize(m_pDevice, 1'000'000'000);
 		}
 	
 
 		createVoxelRenderPass();
-		m_pMeshResource = createCommittedBuffer(100'000'000, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_HEAP_TYPE_DEFAULT, L"MeshBuffer");
+		m_pMeshResource = createCommittedBuffer(1'000'000'000, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_HEAP_TYPE_DEFAULT, L"MeshBuffer");
+		m_meshResourceOffset = 0;
 	}
 
 	void Renderer::shutdown()
@@ -91,17 +104,6 @@ namespace Okay
 		frame.ringBuffer.unmap();
 	}
 
-	void Renderer::updateChunkData(const Chunk& chunk)
-	{
-		// Temp
-
-		reset(m_frames[0].pCommandAllocator, m_frames[0].pCommandList);
-		writeChunkDataToGPU(chunk, m_frames[0]);
-
-		execute(m_frames[0].pCommandList);
-		signal(m_frames[0].pFence, m_frames[0].fenceValue);
-	}
-
 	void Renderer::updateBuffers(const World& world)
 	{
 		const Camera& camera = world.getCameraConst();
@@ -111,6 +113,12 @@ namespace Okay
 
 		FrameResources& frame = m_frames[m_pSwapChain->GetCurrentBackBufferIndex()];
 		m_renderDataGVA = frame.ringBuffer.allocate(&renderData, sizeof(renderData));
+
+		const std::vector<ChunkID>& newChunks = world.getNewChunks();
+		for (ChunkID chunkId : newChunks)
+		{
+			writeChunkDataToGPU(world, chunkId, frame);
+		}
 	}
 
 	void Renderer::preRender()
@@ -131,15 +139,18 @@ namespace Okay
 		frame.pCommandList->SetPipelineState(m_pVoxelPSO);
 
 		frame.pCommandList->SetGraphicsRootConstantBufferView(0, m_renderDataGVA);
-		frame.pCommandList->SetGraphicsRootShaderResourceView(1, m_pMeshResource->GetGPUVirtualAddress());
 
 		frame.pCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		frame.pCommandList->RSSetViewports(1, &m_viewport);
 		frame.pCommandList->RSSetScissorRects(1, &m_scissorRect);
 		frame.pCommandList->OMSetRenderTargets(1, &frame.cpuBackBufferRTV, false, &frame.cpuDepthTextureDSV);
 
-		// 36 temp
-		frame.pCommandList->DrawInstanced(MAX_BLOCKS_IN_CHUNK * 36, 1, 0, 0);
+		D3D12_GPU_VIRTUAL_ADDRESS chunksMeshGVA = m_pMeshResource->GetGPUVirtualAddress();
+		for (const DXChunk& dxChunk : m_dxChunks)
+		{
+			frame.pCommandList->SetGraphicsRootShaderResourceView(1, chunksMeshGVA + dxChunk.resourceOffset);
+			frame.pCommandList->DrawInstanced(dxChunk.vertexCount, 1, 0, 0);
+		}
 	}
 
 	void Renderer::postRender()
@@ -210,13 +221,12 @@ namespace Okay
 			frame.ringBuffer.unmap();
 	}
 
-	static bool isChunkCoordOccupied(const Chunk& chunk, const glm::uvec3& coord)
+	void Renderer::writeChunkDataToGPU(const World& world, ChunkID chunkId, FrameResources& frame)
 	{
-		return Chunk::isCoordInsideChunk(coord) && chunk.blocks[Chunk::chunkCoordToBlockIdx(coord)] != 0;
-	}
+		const Chunk& chunk = world.getChunkConst(chunkId);
+		glm::ivec2 chunkPos = chunkIDToChunkPos(chunkId);
+		glm::vec3 worldPos = chunkPosToWorldPos(chunkPos);
 
-	void Renderer::writeChunkDataToGPU(const Chunk& chunk, FrameResources& frame)
-	{
 		std::vector<Vertex> meshData;
 		meshData.reserve(MAX_BLOCKS_IN_CHUNK * 36ull); // 36 verticies in a cube (without indices)
 
@@ -225,8 +235,10 @@ namespace Okay
 			if (chunk.blocks[i] == 0)
 				continue;
 			
-			glm::vec3 chunkCoord = Chunk::blockIdxToChunkCoord(i);
+			glm::vec3 chunkCoord = blockIdxToLocalChunkCoord(i);
 			glm::uvec3 chunkCoordUVec = chunkCoord;
+
+			chunkCoord += worldPos; // TEMP
 
 			// Top
 			if (!isChunkCoordOccupied(chunk, chunkCoordUVec + UP_DIR))
@@ -306,7 +318,13 @@ namespace Okay
 			vertex.colour = glm::vec3(rand() / (float)RAND_MAX, rand() / (float)RAND_MAX, rand() / (float)RAND_MAX);
 
 
-		updateDefaultHeapResource(m_pMeshResource, 0, frame, meshData.data(), meshData.size() * sizeof(Vertex));
+		DXChunk& dxChunk = m_dxChunks.emplace_back();
+		dxChunk.resourceOffset = m_meshResourceOffset;
+		dxChunk.vertexCount = (uint32_t)meshData.size();
+
+		uint64_t meshDataSize = meshData.size() * sizeof(Vertex);
+		updateDefaultHeapResource(m_pMeshResource, m_meshResourceOffset, frame, meshData.data(), meshDataSize);
+		m_meshResourceOffset += meshDataSize; // align?
 	}
 
 	void Renderer::enableDebugLayer()

@@ -4,10 +4,12 @@ namespace Okay
 {
 	World::World()
 	{
-		for (uint32_t i = 0; i < MAX_BLOCKS_IN_CHUNK; i++)
+		for (int x = -2; x <= 2; x++)
 		{
-			glm::uvec3 chunkCoord = Chunk::blockIdxToChunkCoord(i);
-			m_testChunk.blocks[i] = i % 2;
+			for (int z = -2; z <= 2; z++)
+			{
+				generateChunk(glm::ivec2(x, z));
+			}
 		}
 	}
 
@@ -25,8 +27,39 @@ namespace Okay
 		return m_camera;
 	}
 
-	const Chunk& World::getChunkConst() const
+	Chunk& World::getChunk(ChunkID chunkId)
 	{
-		return m_testChunk;
+		return m_chunks[chunkId];
+	}
+
+	const Chunk& World::getChunkConst(ChunkID chunkId) const
+	{
+		auto iterator = m_chunks.find(chunkId);
+		OKAY_ASSERT(iterator != m_chunks.end()); // Temp?
+
+		return iterator->second;
+	}
+
+	void World::clearNewChunks()
+	{
+		m_newChunks.clear();
+	}
+
+	const std::vector<ChunkID>& World::getNewChunks() const
+	{
+		return m_newChunks;
+	}
+
+	void World::generateChunk(const glm::ivec2& worldPos)
+	{
+		ChunkID chunkID = chunkPosToChunkID(worldPos);
+		Chunk& chunk = getChunk(chunkID);
+
+		for (uint32_t i = 0; i < MAX_BLOCKS_IN_CHUNK; i++)
+		{
+			chunk.blocks[i] = i % 2;
+		}
+
+		m_newChunks.emplace_back(chunkID);
 	}
 }

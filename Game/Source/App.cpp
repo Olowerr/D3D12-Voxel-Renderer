@@ -46,7 +46,7 @@ void App::updateCamera(TimeStep dt)
 		camTransform.rotation.x = glm::clamp(camTransform.rotation.x, -45.f, 45.f);
 	}
 
-	camTransform.position = camTransform.forwardVec() * -32.f;
+	camTransform.position = camTransform.forwardVec() * -100.f;
 	camTransform.position += glm::vec3(CHUNK_WIDTH * 0.5f, WORLD_HEIGHT * 0.5f, CHUNK_WIDTH * 0.5f);
 
 }

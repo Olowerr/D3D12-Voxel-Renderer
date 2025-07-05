@@ -24,6 +24,12 @@ namespace Okay
 		RingBuffer ringBuffer;
 	};
 
+	struct DXChunk
+	{
+		uint64_t resourceOffset = INVALID_UINT64;
+		uint32_t vertexCount = INVALID_UINT32;
+	};
+
 	class Renderer
 	{
 	public:
@@ -37,7 +43,6 @@ namespace Okay
 		void shutdown();
 
 		void render(const World& world);
-		void updateChunkData(const Chunk& chunk); // takes in ChunkID later too
 
 	private:
 		void updateBuffers(const World& world);
@@ -53,7 +58,7 @@ namespace Okay
 		void transitionResource(ID3D12GraphicsCommandList* pCommandList, ID3D12Resource* pResource, D3D12_RESOURCE_STATES beforeState, D3D12_RESOURCE_STATES newState);
 
 		void updateDefaultHeapResource(ID3D12Resource* pTarget, uint64_t targetOffset, FrameResources& frame, void* pData, uint64_t dataSize);
-		void writeChunkDataToGPU(const Chunk& chunk, FrameResources& frame);
+		void writeChunkDataToGPU(const World& world, ChunkID chunkId, FrameResources& frame);
 
 	private: // Creation
 		void enableDebugLayer();
@@ -86,10 +91,13 @@ namespace Okay
 
 		D3D12_GPU_VIRTUAL_ADDRESS m_renderDataGVA = INVALID_UINT64;
 
+		std::vector<DXChunk> m_dxChunks;
 		ID3D12Resource* m_pMeshResource = nullptr;
+		uint64_t m_meshResourceOffset = INVALID_UINT64;
 
 	private:
 		uint32_t m_rtvIncrementSize = INVALID_UINT32;
 		uint32_t m_dsvIncrementSize = INVALID_UINT32;
+
 	};
 }
