@@ -22,20 +22,20 @@ namespace Okay
 {
 	typedef std::filesystem::path FilePath;
 
-	constexpr uint8_t INVALID_UINT8 = UINT8_MAX;
+	constexpr uint8_t  INVALID_UINT8 = UINT8_MAX;
 	constexpr uint16_t INVALID_UINT16 = UINT16_MAX;
 	constexpr uint32_t INVALID_UINT32 = UINT32_MAX;
 	constexpr uint64_t INVALID_UINT64 = UINT64_MAX;
 
-	constexpr uint32_t WORLD_HEIGHT = 256;
-	constexpr uint32_t CHUNK_WIDTH = 16;
+	constexpr uint32_t WORLD_HEIGHT = 256; // Has to be even
+	constexpr uint32_t CHUNK_WIDTH = 16;   // Has to be even
 	constexpr uint32_t MAX_BLOCKS_IN_CHUNK = CHUNK_WIDTH * CHUNK_WIDTH * WORLD_HEIGHT;
 
-	constexpr uint32_t WORLD_CHUNK_WIDTH = 100; // How many chunks the world can have in X & Z directions (100 temp)
+	constexpr uint32_t WORLD_CHUNK_WIDTH = 100; // How many chunks the world can have in X & Z directions, has to be even
 
-	constexpr glm::uvec3 RIGHT_DIR = glm::uvec3(1, 0, 0);
-	constexpr glm::uvec3 UP_DIR = glm::uvec3(0, 1, 0);
-	constexpr glm::uvec3 FORWARD_DIR = glm::uvec3(0, 0, 1);
+	constexpr glm::ivec3 RIGHT_DIR = glm::ivec3(1, 0, 0);
+	constexpr glm::ivec3 UP_DIR = glm::ivec3(0, 1, 0);
+	constexpr glm::ivec3 FORWARD_DIR = glm::ivec3(0, 0, 1);
 
 	typedef uint64_t ChunkID;
 
@@ -44,53 +44,62 @@ namespace Okay
 		uint32_t blocks[MAX_BLOCKS_IN_CHUNK] = {};
 	};
 
-	constexpr uint32_t localChunkCoordToBlockIdx(const glm::uvec3& localChunkCoord)
+	constexpr uint32_t chunkBlockCoordToChunkBlockIdx(const glm::ivec3& chunkBlockCoord)
 	{
-		return localChunkCoord.x + localChunkCoord.y * CHUNK_WIDTH + localChunkCoord.z * CHUNK_WIDTH * WORLD_HEIGHT;
+		return chunkBlockCoord.x + chunkBlockCoord.y * (int32_t)CHUNK_WIDTH + chunkBlockCoord.z * (int32_t)CHUNK_WIDTH * (int32_t)WORLD_HEIGHT;
 	}
 
-	constexpr glm::uvec3 blockIdxToLocalChunkCoord(uint32_t blockIdx)
+	constexpr glm::ivec3 chunkBlockIdxToChunkBlockCoord(uint32_t chunkBlockIdx)
 	{
-		glm::uvec3 localChunkCoord = {};
-		localChunkCoord.x = blockIdx % CHUNK_WIDTH;
-		localChunkCoord.y = (blockIdx / CHUNK_WIDTH) % WORLD_HEIGHT;
-		localChunkCoord.z = blockIdx / (CHUNK_WIDTH * WORLD_HEIGHT);
+		glm::ivec3 chunkBlockCoord = {};
+		chunkBlockCoord.x = chunkBlockIdx % CHUNK_WIDTH;
+		chunkBlockCoord.y = (chunkBlockIdx / CHUNK_WIDTH) % WORLD_HEIGHT;
+		chunkBlockCoord.z = chunkBlockIdx / (CHUNK_WIDTH * WORLD_HEIGHT);
 
-		return localChunkCoord;
+		return chunkBlockCoord;
 	}
 
-	constexpr bool isLocalCoordInsideChunk(const glm::uvec3& localChunkCoord)
+	constexpr ChunkID chunkCoordToChunkID(const glm::ivec2& chunkCoord)
 	{
-		return localChunkCoord.x < CHUNK_WIDTH && localChunkCoord.y < WORLD_HEIGHT && localChunkCoord.z < CHUNK_WIDTH;
-	}
-
-	constexpr bool isChunkCoordOccupied(const Chunk& chunk, const glm::uvec3& coord)
-	{
-		return isLocalCoordInsideChunk(coord) && chunk.blocks[localChunkCoordToBlockIdx(coord)] != 0;
-	}
-
-	constexpr ChunkID chunkPosToChunkID(const glm::ivec2& chunkWorldPos)
-	{
-		// When I get chunk at 0,0 I want it to be in middle ish, not at the edge of the map
+		// When I get chunk at 0,0 I want it to be in the middle ish, not at the edge of the map
 		uint32_t worldMiddleOffset = WORLD_CHUNK_WIDTH / 2;
-		return ((ChunkID)chunkWorldPos.x + worldMiddleOffset) + ((ChunkID)chunkWorldPos.y + worldMiddleOffset) * WORLD_CHUNK_WIDTH;
+		return ((ChunkID)chunkCoord.x + worldMiddleOffset) + ((ChunkID)chunkCoord.y + worldMiddleOffset) * WORLD_CHUNK_WIDTH;
 	}
 
-	constexpr glm::ivec2 chunkIDToChunkPos(ChunkID chunkID)
+	constexpr glm::ivec2 chunkIDToChunkCoord(ChunkID chunkID)
 	{
-		glm::ivec2 worldPos = {};
-		worldPos.x = int32_t(chunkID % WORLD_CHUNK_WIDTH);
-		worldPos.y = int32_t(chunkID / WORLD_CHUNK_WIDTH);
+		glm::ivec2 chunkCoord = {};
+		chunkCoord.x = int32_t(chunkID % WORLD_CHUNK_WIDTH);
+		chunkCoord.y = int32_t(chunkID / WORLD_CHUNK_WIDTH);
 
-		return worldPos - glm::ivec2(WORLD_CHUNK_WIDTH / 2);
+		return chunkCoord - glm::ivec2(WORLD_CHUNK_WIDTH / 2);
 	}
 
-	constexpr glm::vec3 chunkPosToWorldPos(const glm::ivec2& chunkWorldPos)
+	constexpr glm::ivec3 chunkCoordToWorldCoord(const glm::ivec2& chunkCoord)
 	{
-		glm::vec3 worldPos = glm::vec3(chunkWorldPos.x, 0.f, chunkWorldPos.y);
-		worldPos *= (float)CHUNK_WIDTH;
+		glm::ivec3 worldCoord = glm::ivec3(chunkCoord.x, 0, chunkCoord.y);
+		worldCoord *= CHUNK_WIDTH;
 
-		return worldPos;
+		return worldCoord;
+	}
+
+	inline ChunkID blockCoordToChunkID(const glm::ivec3& blockCoord)
+	{
+		// glm::floor isn't constexpr grr (not like these functions can be called at compile time anyway)
+		glm::ivec2 chunkCoord = glm::floor(glm::vec2(blockCoord.x / (float)CHUNK_WIDTH, blockCoord.z / (float)CHUNK_WIDTH));
+		return chunkCoordToChunkID(chunkCoord);
+	}
+
+	inline glm::ivec3 blockCoordToChunkBlockCoord(const glm::ivec3& blockCoord)
+	{
+		// This function would've been (x = blockCoord.x % CHUNK_WIDTH) if blockCount was unsigned
+		// but we gotta handle negative coordinates too, and I don't wanna use an if statement or ternary operator :eyes:
+		glm::ivec3 chunkBlockCoord = {};
+		chunkBlockCoord.x = (int32_t((glm::ceil(glm::abs(blockCoord.x) / (float)CHUNK_WIDTH)) * CHUNK_WIDTH) + blockCoord.x) % CHUNK_WIDTH;
+		chunkBlockCoord.y = blockCoord.y;
+		chunkBlockCoord.z = (int32_t((glm::ceil(glm::abs(blockCoord.z) / (float)CHUNK_WIDTH)) * CHUNK_WIDTH) + blockCoord.z) % CHUNK_WIDTH;;
+
+		return chunkBlockCoord;
 	}
 
 	inline bool readBinary(FilePath binPath, std::string& output)

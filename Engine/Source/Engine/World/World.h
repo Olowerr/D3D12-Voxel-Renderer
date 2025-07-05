@@ -13,14 +13,19 @@ namespace Okay
 		World();
 		~World();
 
-		Camera& getCamera();
-		const Camera& getCameraConst() const;
+		bool isChunkBlockCoordOccupied(const glm::ivec3& blockCoord) const;
+		
+		Chunk& getChunk(ChunkID chunkID);
+		const Chunk& getChunkConst(ChunkID chunkID) const;
 
-		Chunk& getChunk(ChunkID chunkId);
-		const Chunk& getChunkConst(ChunkID chunkId) const;
+		const Chunk* tryGetChunk(ChunkID chunkID) const;
+		bool isChunkLoaded(ChunkID chunkID) const;
 
 		void clearNewChunks();
 		const std::vector<ChunkID>& getNewChunks() const;
+
+		Camera& getCamera();
+		const Camera& getCameraConst() const;
 
 	private:
 		void generateChunk(const glm::ivec2& worldPos);

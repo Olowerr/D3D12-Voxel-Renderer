@@ -51,12 +51,12 @@ namespace Okay
 			DX_CHECK(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&frame.pFence)));
 			frame.fenceValue = 0;
 
-			frame.ringBuffer.initialize(m_pDevice, 1'000'000'000);
+			frame.ringBuffer.initialize(m_pDevice, 100'000'000);
 		}
 	
 
 		createVoxelRenderPass();
-		m_pMeshResource = createCommittedBuffer(1'000'000'000, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_HEAP_TYPE_DEFAULT, L"MeshBuffer");
+		m_pMeshResource = createCommittedBuffer(100'000'000, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_HEAP_TYPE_DEFAULT, L"MeshBuffer");
 		m_meshResourceOffset = 0;
 	}
 
@@ -224,8 +224,8 @@ namespace Okay
 	void Renderer::writeChunkDataToGPU(const World& world, ChunkID chunkId, FrameResources& frame)
 	{
 		const Chunk& chunk = world.getChunkConst(chunkId);
-		glm::ivec2 chunkPos = chunkIDToChunkPos(chunkId);
-		glm::vec3 worldPos = chunkPosToWorldPos(chunkPos);
+		glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkId);
+		glm::ivec3 worldCoord = chunkCoordToWorldCoord(chunkCoord);
 
 		std::vector<Vertex> meshData;
 		meshData.reserve(MAX_BLOCKS_IN_CHUNK * 36ull); // 36 verticies in a cube (without indices)
@@ -235,81 +235,79 @@ namespace Okay
 			if (chunk.blocks[i] == 0)
 				continue;
 			
-			glm::vec3 chunkCoord = blockIdxToLocalChunkCoord(i);
-			glm::uvec3 chunkCoordUVec = chunkCoord;
-
-			chunkCoord += worldPos; // TEMP
+			glm::ivec3 chunkBlockCoord = chunkBlockIdxToChunkBlockCoord(i);
+			glm::ivec3 worldBlockCoord = chunkBlockCoord + worldCoord;
 
 			// Top
-			if (!isChunkCoordOccupied(chunk, chunkCoordUVec + UP_DIR))
+			if (!world.isChunkBlockCoordOccupied(worldBlockCoord + UP_DIR))
 			{
-				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 0.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 1.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 1.f));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 1));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1));
 
-				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 1.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 0.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 0.f));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0));
 			}
 
 			// Bottom
-			if (!isChunkCoordOccupied(chunk, chunkCoordUVec - UP_DIR))
+			if (!world.isChunkBlockCoordOccupied(worldBlockCoord - UP_DIR))
 			{
-				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 1.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 1.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 0.f));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0));
 
-				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 0.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 0.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 1.f));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 0));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1));
 			}
 
 			// Right
-			if (!isChunkCoordOccupied(chunk, chunkCoordUVec + RIGHT_DIR))
+			if (!world.isChunkBlockCoordOccupied(worldBlockCoord + RIGHT_DIR))
 			{
-				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 0.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 1.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 1.f));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1));
 
-				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 0.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 1.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 0.f));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 0));
 			}
 
 			// Left
-			if (!isChunkCoordOccupied(chunk, chunkCoordUVec - RIGHT_DIR))
+			if (!world.isChunkBlockCoordOccupied(worldBlockCoord - RIGHT_DIR))
 			{
-				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 1.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 1.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 0.f));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 1));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0));
 
-				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 0.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 1.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 0.f));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0));
 			}
 
 			// Forward
-			if (!isChunkCoordOccupied(chunk, chunkCoordUVec + FORWARD_DIR))
+			if (!world.isChunkBlockCoordOccupied(worldBlockCoord + FORWARD_DIR))
 			{
-				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 1.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 1.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 1.f));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 1));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1));
 
-				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 1.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 1.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 1.f));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1));
 			}
 
 			// Backward
-			if (!isChunkCoordOccupied(chunk, chunkCoordUVec - FORWARD_DIR))
+			if (!world.isChunkBlockCoordOccupied(worldBlockCoord - FORWARD_DIR))
 			{
-				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 0.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 1.f, 0.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 0.f));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0));
 
-				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 1.f, 0.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(1.f, 0.f, 0.f));
-				meshData.emplace_back(chunkCoord + glm::vec3(0.f, 0.f, 0.f));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 0));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0));
 			}
 		}
 
@@ -555,6 +553,7 @@ namespace Okay
 		pipelineDesc.NumRenderTargets = 1;
 		pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
 		pipelineDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+		pipelineDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
 
 		DX_CHECK(m_pDevice->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_pVoxelPSO)));
 
