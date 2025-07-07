@@ -21,6 +21,7 @@
 namespace Okay
 {
 	typedef std::filesystem::path FilePath;
+	inline const FilePath RESOURCES_PATH = FilePath("..") / "Engine" / "resources";
 
 	constexpr uint8_t  INVALID_UINT8 = UINT8_MAX;
 	constexpr uint16_t INVALID_UINT16 = UINT16_MAX;
@@ -102,7 +103,7 @@ namespace Okay
 		return chunkBlockCoord;
 	}
 
-	inline bool readBinary(FilePath binPath, std::string& output)
+	inline bool readBinary(const FilePath& binPath, std::string& output)
 	{
 		std::ifstream reader(binPath.c_str(), std::ios::binary);
 		if (!reader)

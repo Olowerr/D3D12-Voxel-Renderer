@@ -10,7 +10,7 @@
 
 namespace Okay
 {
-	inline const FilePath SHADER_PATH = FilePath("..") / "Engine" / "resources" / "shaders";;
+	inline const FilePath SHADER_PATH = RESOURCES_PATH / "shaders";
 
 	constexpr uint64_t alignUint64(uint64_t value, uint32_t alignment)
 	{
@@ -45,7 +45,7 @@ namespace Okay
 		std::string m_includeBuffer;
 	};
 
-	inline D3D12_SHADER_BYTECODE compileShader(FilePath path, std::string_view version, ID3DBlob** pShaderBlob)
+	inline D3D12_SHADER_BYTECODE compileShader(const FilePath& path, std::string_view version, ID3DBlob** pShaderBlob)
 	{
 		ID3DBlob* pErrorBlob = nullptr;
 
@@ -98,6 +98,52 @@ namespace Okay
 		param.Descriptor.ShaderRegister = shaderRegister;
 		param.Descriptor.RegisterSpace = registerSpace;
 		return param;
+	}
+
+	constexpr D3D12_ROOT_PARAMETER createRootParamTable(D3D12_SHADER_VISIBILITY visibility, D3D12_DESCRIPTOR_RANGE* pRanges, uint32_t numRanges)
+	{
+		D3D12_ROOT_PARAMETER param = {};
+		param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+		param.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+		param.DescriptorTable.NumDescriptorRanges = numRanges;
+		param.DescriptorTable.pDescriptorRanges = pRanges;
+		return param;
+	}
+
+	constexpr D3D12_DESCRIPTOR_RANGE createRangeSRV(uint32_t shaderRegister, uint32_t registerSpace, uint32_t numDescriptors, uint32_t offset)
+	{
+		D3D12_DESCRIPTOR_RANGE range = {};
+		range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+		range.NumDescriptors = numDescriptors;
+		range.BaseShaderRegister = shaderRegister;
+		range.RegisterSpace = registerSpace;
+		range.OffsetInDescriptorsFromTableStart = offset;
+		return range;
+	}
+
+	constexpr D3D12_STATIC_SAMPLER_DESC createDefaultStaticPointSamplerDesc()
+	{
+		D3D12_STATIC_SAMPLER_DESC desc = {};
+		desc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+
+		desc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+		desc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+		desc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+
+		desc.MipLODBias = 0.f;
+		desc.MaxAnisotropy = 1;
+		desc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER; //?
+		desc.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
+
+		desc.MinLOD = 0;
+		desc.MaxLOD = D3D12_FLOAT32_MAX;
+
+		desc.ShaderRegister = 0;
+		desc.RegisterSpace = 0;
+
+		desc.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+		return desc;
 	}
 
 	constexpr D3D12_BLEND_DESC createDefaultBlendDesc()

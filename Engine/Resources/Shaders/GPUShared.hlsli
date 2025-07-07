@@ -18,3 +18,5 @@ struct Vertex
 
 ConstantBuffer<RenderData> renderCB : register(b0, space0);
 StructuredBuffer<Vertex> verticies : register(t0, space0);
+Texture2D<float4> textureSheet : register(t1, space0);
+SamplerState pointSampler : register(s0, space0);

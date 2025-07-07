@@ -2,6 +2,9 @@
 #include "Engine/Application/Window.h"
 #include "Engine/World/World.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb/stb_image.h"
+
 namespace Okay
 {
 	struct RenderData
@@ -36,44 +39,39 @@ namespace Okay
 
 		m_pRTVDescHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_RTV, MAX_FRAMES_IN_FLIGHT, false, L"BackBufferRTVDescriptorHeap");
 		m_pDSVDescHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_DSV, MAX_FRAMES_IN_FLIGHT, false, L"DepthTextureDSVDescriptorHeap");
+		m_pTextureDescHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, true, L"TexturesSRVDescriptorHeap");
+
 		m_rtvIncrementSize = m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 		m_dsvIncrementSize = m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+		m_cbvSrvUavIncrementSize = m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
 		createSwapChain(pFactory, window);
 		D3D12_RELEASE(pFactory);
 
 		for (FrameResources& frame : m_frames)
 		{
-			DX_CHECK(m_pDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&frame.pCommandAllocator)));
-			DX_CHECK(m_pDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, frame.pCommandAllocator, nullptr, IID_PPV_ARGS(&frame.pCommandList)));
-			DX_CHECK(frame.pCommandList->Close());
-
-			DX_CHECK(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&frame.pFence)));
-			frame.fenceValue = 0;
-
-			frame.ringBuffer.initialize(m_pDevice, 100'000'000);
+			initializeFrameResources(frame, 100'000'000);
 		}
 	
-
 		createVoxelRenderPass();
-		m_pMeshResource = createCommittedBuffer(100'000'000, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_HEAP_TYPE_DEFAULT, L"MeshBuffer");
+		m_pMeshResource = createCommittedBuffer(100'000'000, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE, D3D12_HEAP_TYPE_DEFAULT, L"MeshBuffer");
 		m_meshResourceOffset = 0;
+
+		FrameResources initFrame;
+		initializeFrameResources(initFrame, 100'000);
+		reset(initFrame.pCommandAllocator, initFrame.pCommandList);
+
+		m_pTextureSheet = createSRVTexture(RESOURCES_PATH / "Textures" / "TextureSheet.png", initFrame, L"TextureSheet");
+		m_textureHandle = createSRVDescriptor(m_pTextureDescHeap, 0, m_pTextureSheet, nullptr);
+
+		flush(initFrame.pCommandList, initFrame.pCommandAllocator, initFrame.pFence, initFrame.fenceValue);
+		shutdowFrameResources(initFrame);
 	}
 
 	void Renderer::shutdown()
 	{
 		for (FrameResources& frame : m_frames)
-		{
-			wait(frame.pFence, frame.fenceValue);
-
-			D3D12_RELEASE(frame.pFence);
-			D3D12_RELEASE(frame.pCommandAllocator);
-			D3D12_RELEASE(frame.pCommandList);
-			D3D12_RELEASE(frame.pBackBuffer);
-			D3D12_RELEASE(frame.pDepthTexture);
-
-			frame.ringBuffer.shutdown();
-		}
+			shutdowFrameResources(frame);
 
 		D3D12_RELEASE(m_pDevice);
 		D3D12_RELEASE(m_pCommandQueue);
@@ -82,9 +80,11 @@ namespace Okay
 		D3D12_RELEASE(m_pVoxelRootSignature);
 		D3D12_RELEASE(m_pVoxelPSO);
 		D3D12_RELEASE(m_pMeshResource);
+		D3D12_RELEASE(m_pTextureSheet);
 
 		D3D12_RELEASE(m_pRTVDescHeap);
 		D3D12_RELEASE(m_pDSVDescHeap);
+		D3D12_RELEASE(m_pTextureDescHeap);
 	}
 
 	void Renderer::render(const World& world)
@@ -115,9 +115,14 @@ namespace Okay
 		m_renderDataGVA = frame.ringBuffer.allocate(&renderData, sizeof(renderData));
 
 		const std::vector<ChunkID>& newChunks = world.getNewChunks();
-		for (ChunkID chunkId : newChunks)
+		if (newChunks.size())
 		{
-			writeChunkDataToGPU(world, chunkId, frame);
+			transitionResource(frame.pCommandList, m_pMeshResource, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+			for (ChunkID chunkId : newChunks)
+			{
+				writeChunkDataToGPU(world, chunkId, frame);
+			}
+			transitionResource(frame.pCommandList, m_pMeshResource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
 		}
 	}
 
@@ -138,7 +143,10 @@ namespace Okay
 		frame.pCommandList->SetGraphicsRootSignature(m_pVoxelRootSignature);
 		frame.pCommandList->SetPipelineState(m_pVoxelPSO);
 
+		frame.pCommandList->SetDescriptorHeaps(1, &m_pTextureDescHeap);
+
 		frame.pCommandList->SetGraphicsRootConstantBufferView(0, m_renderDataGVA);
+		frame.pCommandList->SetGraphicsRootDescriptorTable(2, m_textureHandle);
 
 		frame.pCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		frame.pCommandList->RSSetViewports(1, &m_viewport);
@@ -172,6 +180,7 @@ namespace Okay
 
 	void Renderer::execute(ID3D12GraphicsCommandList* pCommandList)
 	{
+
 		DX_CHECK(pCommandList->Close());
 		m_pCommandQueue->ExecuteCommandLists(1, (ID3D12CommandList**)&pCommandList);
 	}
@@ -192,6 +201,14 @@ namespace Okay
 	{
 		DX_CHECK(pCommandAlloator->Reset());
 		DX_CHECK(pCommandList->Reset(pCommandAlloator, nullptr));
+	}
+
+	void Renderer::flush(ID3D12GraphicsCommandList* pCommandList, ID3D12CommandAllocator* pCommandAlloator, ID3D12Fence* pFence, uint64_t& fenceValue)
+	{
+		execute(pCommandList);
+		signal(pFence, fenceValue);
+		wait(pFence, fenceValue);
+		reset(pCommandAlloator, pCommandList);
 	}
 
 	void Renderer::transitionResource(ID3D12GraphicsCommandList* pCommandList, ID3D12Resource* pResource, D3D12_RESOURCE_STATES beforeState, D3D12_RESOURCE_STATES newState)
@@ -325,6 +342,42 @@ namespace Okay
 		m_meshResourceOffset += meshDataSize; // align?
 	}
 
+	D3D12_CPU_DESCRIPTOR_HANDLE Renderer::createRTVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc)
+	{
+		OKAY_ASSERT(pResource || pDesc);
+
+		D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = pDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+		cpuHandle.ptr += slotIdx * (uint64_t)m_rtvIncrementSize;
+		m_pDevice->CreateRenderTargetView(pResource, pDesc, cpuHandle);
+
+		return cpuHandle;
+	}
+
+	D3D12_CPU_DESCRIPTOR_HANDLE Renderer::createDSVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_DEPTH_STENCIL_VIEW_DESC* pDesc)
+	{
+		OKAY_ASSERT(pResource || pDesc);
+
+		D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = pDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+		cpuHandle.ptr += slotIdx * (uint64_t)m_dsvIncrementSize;
+		m_pDevice->CreateDepthStencilView(pResource, pDesc, cpuHandle);
+		
+		return cpuHandle;
+	}
+
+	D3D12_GPU_DESCRIPTOR_HANDLE Renderer::createSRVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_SHADER_RESOURCE_VIEW_DESC* pDesc)
+	{
+		OKAY_ASSERT(pResource || pDesc);
+
+		D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = pDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+		cpuHandle.ptr += slotIdx * (uint64_t)m_cbvSrvUavIncrementSize;
+		m_pDevice->CreateShaderResourceView(pResource, pDesc, cpuHandle);
+
+		// returns for convenience
+		D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = pDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
+		gpuHandle.ptr += slotIdx * (uint64_t)m_cbvSrvUavIncrementSize;
+		return gpuHandle;
+	}
+
 	void Renderer::enableDebugLayer()
 	{
 		ID3D12Debug* pDebugController = nullptr;
@@ -407,14 +460,9 @@ namespace Okay
 		{
 			FrameResources& frame = m_frames[i];
 
-
 			// Back Buffer
 			DX_CHECK(m_pSwapChain->GetBuffer(i, IID_PPV_ARGS(&frame.pBackBuffer)));
-
-			frame.cpuBackBufferRTV = m_pRTVDescHeap->GetCPUDescriptorHandleForHeapStart();
-			frame.cpuBackBufferRTV.ptr += (uint64_t)i * m_rtvIncrementSize;
-
-			m_pDevice->CreateRenderTargetView(frame.pBackBuffer, nullptr, frame.cpuBackBufferRTV);
+			frame.cpuBackBufferRTV = createRTVDescriptor(m_pRTVDescHeap, i, frame.pBackBuffer, nullptr);
 
 
 			// Depth
@@ -458,6 +506,31 @@ namespace Okay
 				m_scissorRect.bottom = (LONG)textureDesc.Height;
 			}
 		}
+	}
+
+	void Renderer::initializeFrameResources(FrameResources& frame, uint64_t ringBufferSize)
+	{
+		DX_CHECK(m_pDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&frame.pCommandAllocator)));
+		DX_CHECK(m_pDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, frame.pCommandAllocator, nullptr, IID_PPV_ARGS(&frame.pCommandList)));
+		DX_CHECK(frame.pCommandList->Close());
+
+		DX_CHECK(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&frame.pFence)));
+		frame.fenceValue = 0;
+
+		frame.ringBuffer.initialize(m_pDevice, ringBufferSize);
+	}
+
+	void Renderer::shutdowFrameResources(FrameResources& frame)
+	{
+		wait(frame.pFence, frame.fenceValue);
+
+		D3D12_RELEASE(frame.pFence);
+		D3D12_RELEASE(frame.pCommandAllocator);
+		D3D12_RELEASE(frame.pCommandList);
+		D3D12_RELEASE(frame.pBackBuffer);
+		D3D12_RELEASE(frame.pDepthTexture);
+
+		frame.ringBuffer.shutdown();
 	}
 
 	ID3D12DescriptorHeap* Renderer::createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors, bool shaderVisible, std::wstring_view name)
@@ -504,6 +577,74 @@ namespace Okay
 		return pResource;
 	}
 
+	ID3D12Resource* Renderer::createSRVTexture(const FilePath& filePath, FrameResources& frame, std::wstring_view name)
+	{
+		int textureWidth = 0;
+		int textureHeight = 0;
+		uint8_t* pTextureData = stbi_load(filePath.string().c_str(), &textureWidth, &textureHeight, nullptr, STBI_rgb_alpha);
+		OKAY_ASSERT(pTextureData);
+
+		D3D12_RESOURCE_DESC desc = {};
+		desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+		desc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+		desc.Width = (uint64_t)textureWidth;
+		desc.Height = (uint32_t)textureHeight;
+		desc.DepthOrArraySize = 1;
+		desc.MipLevels = 1; // TODO: Mips
+		desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		desc.SampleDesc.Count = 1;
+		desc.SampleDesc.Quality = 0;
+		desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+		desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+		D3D12_HEAP_PROPERTIES heapProperties = {};
+		heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+		heapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+		heapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+		heapProperties.CreationNodeMask = 0;
+		heapProperties.VisibleNodeMask = 0;
+
+		ID3D12Resource* pTexture = nullptr;
+		DX_CHECK(m_pDevice->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&pTexture)));
+
+		pTexture->SetName(name.data());
+		uploadTextureData(pTexture, pTextureData, frame);
+		transitionResource(frame.pCommandList, pTexture, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+
+		return pTexture;
+	}
+
+	void Renderer::uploadTextureData(ID3D12Resource* pTarget, uint8_t* pTextureData, FrameResources& frame)
+	{
+		D3D12_RESOURCE_DESC resourceDesc = pTarget->GetDesc();
+		D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
+		uint64_t rowSizeInBytes = INVALID_UINT64;
+		uint64_t totalSizeInBytes = INVALID_UINT64;
+
+		m_pDevice->GetCopyableFootprints(&resourceDesc, 0, 1, 0, &footprint, nullptr, &rowSizeInBytes, &totalSizeInBytes);
+
+		uint8_t* pMappedBuffer = frame.ringBuffer.map();
+
+		for (uint32_t i = 0; i < resourceDesc.Height; i++)
+		{
+			memcpy(pMappedBuffer + i * footprint.Footprint.RowPitch, pTextureData + i * rowSizeInBytes, rowSizeInBytes);
+		}
+
+		D3D12_TEXTURE_COPY_LOCATION source = {};
+		source.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+		source.PlacedFootprint = footprint;
+		source.PlacedFootprint.Offset = frame.ringBuffer.getOffset();
+		source.pResource = frame.ringBuffer.getDXResource();
+
+		D3D12_TEXTURE_COPY_LOCATION dest = {};
+		dest.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		dest.SubresourceIndex = 0;
+		dest.pResource = pTarget;
+
+		frame.pCommandList->CopyTextureRegion(&dest, 0, 0, 0, &source, nullptr);
+		frame.ringBuffer.unmap();
+	}
+
 	ID3D12RootSignature* Renderer::createRootSignature(const D3D12_ROOT_SIGNATURE_DESC* pDesc, std::wstring_view name)
 	{
 		ID3DBlob* pRootBlob = nullptr;
@@ -533,11 +674,16 @@ namespace Okay
 		rootParams.emplace_back(createRootParamCBV(D3D12_SHADER_VISIBILITY_ALL, 0, 0));
 		rootParams.emplace_back(createRootParamSRV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0));
 
+		D3D12_DESCRIPTOR_RANGE textureRange = createRangeSRV(1, 0, 1, 0);
+		rootParams.emplace_back(createRootParamTable(D3D12_SHADER_VISIBILITY_PIXEL, &textureRange, 1));
+
+		D3D12_STATIC_SAMPLER_DESC pointSampler = createDefaultStaticPointSamplerDesc();
+
 		D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
 		rootDesc.NumParameters = (uint32_t)rootParams.size();
 		rootDesc.pParameters = rootParams.data();
-		rootDesc.NumStaticSamplers = 0;
-		rootDesc.pStaticSamplers = nullptr;
+		rootDesc.NumStaticSamplers = 1;
+		rootDesc.pStaticSamplers = &pointSampler;
 		rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
 
 		m_pVoxelRootSignature = createRootSignature(&rootDesc, L"VoxelRootSignature");
@@ -553,7 +699,6 @@ namespace Okay
 		pipelineDesc.NumRenderTargets = 1;
 		pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
 		pipelineDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
-		pipelineDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
 
 		DX_CHECK(m_pDevice->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_pVoxelPSO)));
 
