@@ -109,6 +109,7 @@ namespace Okay
 
 		ID3D12Resource* m_pTextureSheet = nullptr;
 		D3D12_GPU_DESCRIPTOR_HANDLE m_textureHandle = {};
+		glm::uvec2 m_textureSheetNumTextures = glm::uvec2(INVALID_UINT32);
 
 	private:
 		uint32_t m_rtvIncrementSize = INVALID_UINT32;

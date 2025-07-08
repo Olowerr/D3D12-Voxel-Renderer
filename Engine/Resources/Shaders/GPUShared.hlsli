@@ -2,18 +2,21 @@
 struct RenderData
 {
     float4x4 viewProjMatrix;
+    uint2 textureSheetNumTextures;
 };
 
 struct VoxelVSOutput
 {
     float4 svPosition : SV_POSITION;
-    float3 color : COLOR;
+    float2 uv : UV;
+    uint textureIdx : TEXTURE_IDX;
 };
 
 struct Vertex
 {
     float3 position;
-    float3 colour;
+    float2 uv;
+    uint textureIdx;
 };
 
 ConstantBuffer<RenderData> renderCB : register(b0, space0);

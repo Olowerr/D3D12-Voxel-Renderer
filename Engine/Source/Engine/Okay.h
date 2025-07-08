@@ -42,7 +42,7 @@ namespace Okay
 
 	struct Chunk // Chunk block coordinate system order: X -> Y -> Z
 	{
-		uint32_t blocks[MAX_BLOCKS_IN_CHUNK] = {};
+		uint8_t blocks[MAX_BLOCKS_IN_CHUNK] = {};
 	};
 
 	constexpr uint32_t chunkBlockCoordToChunkBlockIdx(const glm::ivec3& chunkBlockCoord)

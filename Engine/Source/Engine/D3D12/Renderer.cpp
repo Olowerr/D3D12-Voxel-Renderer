@@ -10,18 +10,20 @@ namespace Okay
 	struct RenderData
 	{
 		glm::mat4 viewProjMatrix = glm::mat4(1.f);
+		glm::uvec2 textureSheetNumTextures = glm::uvec2(0, 0);
 	};
 
 	struct Vertex
 	{
 		Vertex() = default;
-		Vertex(const glm::vec3& position)
-			:position(position)
+		Vertex(const glm::vec3& position, const glm::vec2& uv, uint32_t textureIdx)
+			:position(position), uv(uv), textureIdx(textureIdx)
 		{
 		}
 
 		glm::vec3 position = glm::vec3(0.f);
-		glm::vec3 colour = glm::vec3(0.f);
+		glm::vec2 uv = glm::vec2(0.f);
+		uint32_t textureIdx = 0;
 	};
 
 	void Renderer::initialize(const Window& window)
@@ -48,10 +50,9 @@ namespace Okay
 		createSwapChain(pFactory, window);
 		D3D12_RELEASE(pFactory);
 
+
 		for (FrameResources& frame : m_frames)
-		{
 			initializeFrameResources(frame, 100'000'000);
-		}
 	
 		createVoxelRenderPass();
 		m_pMeshResource = createCommittedBuffer(100'000'000, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE, D3D12_HEAP_TYPE_DEFAULT, L"MeshBuffer");
@@ -63,6 +64,7 @@ namespace Okay
 
 		m_pTextureSheet = createSRVTexture(RESOURCES_PATH / "Textures" / "TextureSheet.png", initFrame, L"TextureSheet");
 		m_textureHandle = createSRVDescriptor(m_pTextureDescHeap, 0, m_pTextureSheet, nullptr);
+		m_textureSheetNumTextures = glm::uvec2(m_pTextureSheet->GetDesc().Width / 16, m_pTextureSheet->GetDesc().Height / 16);
 
 		flush(initFrame.pCommandList, initFrame.pCommandAllocator, initFrame.pFence, initFrame.fenceValue);
 		shutdowFrameResources(initFrame);
@@ -110,6 +112,7 @@ namespace Okay
 
 		RenderData renderData = {};
 		renderData.viewProjMatrix = glm::transpose(camera.getProjectionMatrix(m_viewport.Width, m_viewport.Height) * camera.transform.getViewMatrix());
+		renderData.textureSheetNumTextures = m_textureSheetNumTextures;
 
 		FrameResources& frame = m_frames[m_pSwapChain->GetCurrentBackBufferIndex()];
 		m_renderDataGVA = frame.ringBuffer.allocate(&renderData, sizeof(renderData));
@@ -255,83 +258,82 @@ namespace Okay
 			glm::ivec3 chunkBlockCoord = chunkBlockIdxToChunkBlockCoord(i);
 			glm::ivec3 worldBlockCoord = chunkBlockCoord + worldCoord;
 
+			uint32_t sideTextureIdx = 0;
+
 			// Top
 			if (!world.isChunkBlockCoordOccupied(worldBlockCoord + UP_DIR))
 			{
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 1));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), 2);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 1), 2);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), 2);
 
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), 2);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), 2);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), 2);
+
+				sideTextureIdx = 1;
 			}
 
 			// Bottom
 			if (!world.isChunkBlockCoordOccupied(worldBlockCoord - UP_DIR))
 			{
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), 0);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 0), 0);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), 0);
 
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 0));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), 0);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), 0);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), 0);
 			}
 
 			// Right
 			if (!world.isChunkBlockCoordOccupied(worldBlockCoord + RIGHT_DIR))
 			{
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(1, 0), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), sideTextureIdx);
 
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 0));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), sideTextureIdx);
 			}
 
 			// Left
 			if (!world.isChunkBlockCoordOccupied(worldBlockCoord - RIGHT_DIR))
 			{
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 1));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(0, 0), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), sideTextureIdx);
 
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(1, 1), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), sideTextureIdx);
 			}
 
 			// Forward
 			if (!world.isChunkBlockCoordOccupied(worldBlockCoord + FORWARD_DIR))
 			{
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 1));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 0), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), sideTextureIdx);
 
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(0, 1), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), sideTextureIdx);
 			}
 
 			// Backward
 			if (!world.isChunkBlockCoordOccupied(worldBlockCoord - FORWARD_DIR))
 			{
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(0, 0), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), sideTextureIdx);
 
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 0));
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0));
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(1, 1), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), sideTextureIdx);
 			}
 		}
-
-		// DBG
-		for (Vertex& vertex : meshData)
-			vertex.colour = glm::vec3(rand() / (float)RAND_MAX, rand() / (float)RAND_MAX, rand() / (float)RAND_MAX);
-
 
 		DXChunk& dxChunk = m_dxChunks.emplace_back();
 		dxChunk.resourceOffset = m_meshResourceOffset;
