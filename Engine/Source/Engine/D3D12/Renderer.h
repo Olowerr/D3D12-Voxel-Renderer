@@ -56,7 +56,7 @@ namespace Okay
 		void reset(ID3D12CommandAllocator* pCommandAlloator, ID3D12GraphicsCommandList* pCommandList);
 		void flush(ID3D12GraphicsCommandList* pCommandList, ID3D12CommandAllocator* pCommandAlloator, ID3D12Fence* pFence, uint64_t& fenceValue);
 
-		void transitionResource(ID3D12GraphicsCommandList* pCommandList, ID3D12Resource* pResource, D3D12_RESOURCE_STATES beforeState, D3D12_RESOURCE_STATES newState);
+		void transitionResource(ID3D12GraphicsCommandList* pCommandList, ID3D12Resource* pResource, D3D12_RESOURCE_STATES beforeState, D3D12_RESOURCE_STATES newState, uint32_t subResource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
 
 		void updateDefaultHeapResource(ID3D12Resource* pTarget, uint64_t targetOffset, FrameResources& frame, void* pData, uint64_t dataSize);
 		void writeChunkDataToGPU(const World& world, ChunkID chunkId, FrameResources& frame);
@@ -64,6 +64,7 @@ namespace Okay
 		D3D12_CPU_DESCRIPTOR_HANDLE createRTVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc);
 		D3D12_CPU_DESCRIPTOR_HANDLE createDSVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_DEPTH_STENCIL_VIEW_DESC* pDesc);
 		D3D12_GPU_DESCRIPTOR_HANDLE createSRVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_SHADER_RESOURCE_VIEW_DESC* pDesc);
+		D3D12_GPU_DESCRIPTOR_HANDLE createUAVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_UNORDERED_ACCESS_VIEW_DESC* pDesc);
 
 	private: // Creation
 		void enableDebugLayer();
@@ -79,8 +80,9 @@ namespace Okay
 		ID3D12DescriptorHeap* createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors, bool shaderVisible, std::wstring_view name);
 		ID3D12Resource* createCommittedBuffer(uint64_t size, D3D12_RESOURCE_STATES initialState, D3D12_HEAP_TYPE heapType, std::wstring_view name);
 		
-		ID3D12Resource* createSRVTexture(const FilePath& filePath, FrameResources& frame, std::wstring_view name);
-		void uploadTextureData(ID3D12Resource* pTarget, uint8_t* pTextureData, FrameResources& frame);
+		ID3D12Resource* createTextureSheet(const FilePath& filePath, FrameResources& frame, uint32_t padding, uint32_t tileSize, std::wstring_view name);
+		void uploadTextureSheetData(ID3D12Resource* pTarget, FrameResources& frame, uint8_t* pTextureData, uint32_t origTextureWidth, uint32_t origTextureHeight, uint32_t padding, uint32_t tileSize);
+		void generateTextureSheetMipMaps(ID3D12Resource* pTextureSheet, uint32_t tileSize);
 
 		void createVoxelRenderPass();
 
@@ -109,7 +111,6 @@ namespace Okay
 
 		ID3D12Resource* m_pTextureSheet = nullptr;
 		D3D12_GPU_DESCRIPTOR_HANDLE m_textureHandle = {};
-		glm::uvec2 m_textureSheetNumTextures = glm::uvec2(INVALID_UINT32);
 
 	private:
 		uint32_t m_rtvIncrementSize = INVALID_UINT32;

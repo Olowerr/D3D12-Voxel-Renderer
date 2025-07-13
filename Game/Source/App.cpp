@@ -45,7 +45,7 @@ void App::updateCamera(TimeStep dt)
 	}
 
 	Transform& camTransform = m_world.getCamera().transform;
-	float camMoveSpeed = 50.f;
+	float camMoveSpeed = 150.f;
 	float camRotSpeed = 0.1f;
 
 	// Movement

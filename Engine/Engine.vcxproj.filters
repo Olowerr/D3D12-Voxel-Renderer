@@ -75,6 +75,7 @@
   <ItemGroup>
     <FxCompile Include="Resources\Shaders\VertexShader.hlsl" />
     <FxCompile Include="Resources\Shaders\PixelShader.hlsl" />
+    <FxCompile Include="Resources\Shaders\TextureSheetMipMapCS.hlsl" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Resources\Shaders\GPUShared.hlsli" />

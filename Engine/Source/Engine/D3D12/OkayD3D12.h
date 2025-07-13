@@ -104,7 +104,7 @@ namespace Okay
 	{
 		D3D12_ROOT_PARAMETER param = {};
 		param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-		param.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+		param.ShaderVisibility = visibility;
 		param.DescriptorTable.NumDescriptorRanges = numRanges;
 		param.DescriptorTable.pDescriptorRanges = pRanges;
 		return param;
@@ -114,6 +114,17 @@ namespace Okay
 	{
 		D3D12_DESCRIPTOR_RANGE range = {};
 		range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+		range.NumDescriptors = numDescriptors;
+		range.BaseShaderRegister = shaderRegister;
+		range.RegisterSpace = registerSpace;
+		range.OffsetInDescriptorsFromTableStart = offset;
+		return range;
+	}
+	
+	constexpr D3D12_DESCRIPTOR_RANGE createRangeUAV(uint32_t shaderRegister, uint32_t registerSpace, uint32_t numDescriptors, uint32_t offset)
+	{
+		D3D12_DESCRIPTOR_RANGE range = {};
+		range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
 		range.NumDescriptors = numDescriptors;
 		range.BaseShaderRegister = shaderRegister;
 		range.RegisterSpace = registerSpace;

@@ -7,23 +7,33 @@
 
 namespace Okay
 {
+	constexpr uint32_t TEXTURE_SHEET_TILE_SIZE = 16;
+	constexpr uint32_t TEXTURE_SHEET_PADDING = 8;
+
 	struct RenderData
 	{
 		glm::mat4 viewProjMatrix = glm::mat4(1.f);
-		glm::uvec2 textureSheetNumTextures = glm::uvec2(0, 0);
 	};
 
 	struct Vertex
 	{
 		Vertex() = default;
-		Vertex(const glm::vec3& position, const glm::vec2& uv, uint32_t textureIdx)
-			:position(position), uv(uv), textureIdx(textureIdx)
+		Vertex(const glm::vec3& position, const glm::vec2& globalUV, uint32_t textureID, const glm::uvec2& sheetDims)
+			:position(position)
 		{
+			// This calculation breaks if sheetDims.x == TILE_SIZE but it's okay :3
+			uint32_t numXTextures = sheetDims.x / (TEXTURE_SHEET_TILE_SIZE + TEXTURE_SHEET_PADDING / 2);
+
+			glm::vec2 tileCoords = glm::vec2(textureID % numXTextures, textureID / numXTextures);
+			glm::vec2 invSheetDims = 1.f / (glm::vec2)sheetDims;
+
+			uv = globalUV;
+			uv *= invSheetDims * (float)TEXTURE_SHEET_TILE_SIZE;
+			uv += tileCoords * float(TEXTURE_SHEET_TILE_SIZE + TEXTURE_SHEET_PADDING) * invSheetDims;
 		}
 
 		glm::vec3 position = glm::vec3(0.f);
 		glm::vec2 uv = glm::vec2(0.f);
-		uint32_t textureIdx = 0;
 	};
 
 	void Renderer::initialize(const Window& window)
@@ -62,12 +72,13 @@ namespace Okay
 		initializeFrameResources(initFrame, 100'000);
 		reset(initFrame.pCommandAllocator, initFrame.pCommandList);
 
-		m_pTextureSheet = createSRVTexture(RESOURCES_PATH / "Textures" / "TextureSheet.png", initFrame, L"TextureSheet");
+		m_pTextureSheet = createTextureSheet(RESOURCES_PATH / "Textures" / "TextureSheet.png", initFrame, TEXTURE_SHEET_PADDING, TEXTURE_SHEET_TILE_SIZE, L"TextureSheet");
 		m_textureHandle = createSRVDescriptor(m_pTextureDescHeap, 0, m_pTextureSheet, nullptr);
-		m_textureSheetNumTextures = glm::uvec2(m_pTextureSheet->GetDesc().Width / 16, m_pTextureSheet->GetDesc().Height / 16);
 
 		flush(initFrame.pCommandList, initFrame.pCommandAllocator, initFrame.pFence, initFrame.fenceValue);
 		shutdowFrameResources(initFrame);
+
+		generateTextureSheetMipMaps(m_pTextureSheet, TEXTURE_SHEET_TILE_SIZE);
 	}
 
 	void Renderer::shutdown()
@@ -112,7 +123,6 @@ namespace Okay
 
 		RenderData renderData = {};
 		renderData.viewProjMatrix = glm::transpose(camera.getProjectionMatrix(m_viewport.Width, m_viewport.Height) * camera.transform.getViewMatrix());
-		renderData.textureSheetNumTextures = m_textureSheetNumTextures;
 
 		FrameResources& frame = m_frames[m_pSwapChain->GetCurrentBackBufferIndex()];
 		m_renderDataGVA = frame.ringBuffer.allocate(&renderData, sizeof(renderData));
@@ -183,7 +193,6 @@ namespace Okay
 
 	void Renderer::execute(ID3D12GraphicsCommandList* pCommandList)
 	{
-
 		DX_CHECK(pCommandList->Close());
 		m_pCommandQueue->ExecuteCommandLists(1, (ID3D12CommandList**)&pCommandList);
 	}
@@ -214,14 +223,14 @@ namespace Okay
 		reset(pCommandAlloator, pCommandList);
 	}
 
-	void Renderer::transitionResource(ID3D12GraphicsCommandList* pCommandList, ID3D12Resource* pResource, D3D12_RESOURCE_STATES beforeState, D3D12_RESOURCE_STATES newState)
+	void Renderer::transitionResource(ID3D12GraphicsCommandList* pCommandList, ID3D12Resource* pResource, D3D12_RESOURCE_STATES beforeState, D3D12_RESOURCE_STATES newState, uint32_t subResource)
 	{
 		D3D12_RESOURCE_BARRIER barrier = {};
 		barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 		barrier.Transition.pResource = pResource;
 		barrier.Transition.StateBefore = beforeState;
 		barrier.Transition.StateAfter = newState;
-		barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+		barrier.Transition.Subresource = subResource;
 		barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
 
 		pCommandList->ResourceBarrier(1, &barrier);
@@ -247,6 +256,8 @@ namespace Okay
 		glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkId);
 		glm::ivec3 worldCoord = chunkCoordToWorldCoord(chunkCoord);
 
+		glm::uvec2 textureSheetDims = glm::uvec2((uint32_t)m_pTextureSheet->GetDesc().Width, m_pTextureSheet->GetDesc().Height);
+
 		std::vector<Vertex> meshData;
 		meshData.reserve(MAX_BLOCKS_IN_CHUNK * 36ull); // 36 verticies in a cube (without indices)
 
@@ -263,13 +274,13 @@ namespace Okay
 			// Top
 			if (!world.isChunkBlockCoordOccupied(worldBlockCoord + UP_DIR))
 			{
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), 2);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 1), 2);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), 2);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), 2, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 1), 2, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), 2, textureSheetDims);
 
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), 2);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), 2);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), 2);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), 2, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), 2, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), 2, textureSheetDims);
 
 				sideTextureIdx = 1;
 			}
@@ -277,61 +288,61 @@ namespace Okay
 			// Bottom
 			if (!world.isChunkBlockCoordOccupied(worldBlockCoord - UP_DIR))
 			{
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), 0);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 0), 0);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), 0);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), 0, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 0), 0, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), 0, textureSheetDims);
 
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), 0);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), 0);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), 0);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), 0, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), 0, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), 0, textureSheetDims);
 			}
 
 			// Right
 			if (!world.isChunkBlockCoordOccupied(worldBlockCoord + RIGHT_DIR))
 			{
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), sideTextureIdx);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(1, 0), sideTextureIdx);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), sideTextureIdx, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(1, 0), sideTextureIdx, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), sideTextureIdx, textureSheetDims);
 
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), sideTextureIdx);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), sideTextureIdx);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), sideTextureIdx, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), sideTextureIdx, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), sideTextureIdx, textureSheetDims);
 			}
 
 			// Left
 			if (!world.isChunkBlockCoordOccupied(worldBlockCoord - RIGHT_DIR))
 			{
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), sideTextureIdx);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(0, 0), sideTextureIdx);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), sideTextureIdx, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(0, 0), sideTextureIdx, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), sideTextureIdx, textureSheetDims);
 
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(1, 1), sideTextureIdx);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), sideTextureIdx);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(1, 1), sideTextureIdx, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), sideTextureIdx, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), sideTextureIdx, textureSheetDims);
 			}
 
 			// Forward
 			if (!world.isChunkBlockCoordOccupied(worldBlockCoord + FORWARD_DIR))
 			{
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), sideTextureIdx);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 0), sideTextureIdx);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), sideTextureIdx, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 0), sideTextureIdx, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), sideTextureIdx, textureSheetDims);
 
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), sideTextureIdx);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(0, 1), sideTextureIdx);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), sideTextureIdx, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(0, 1), sideTextureIdx, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), sideTextureIdx, textureSheetDims);
 			}
 
 			// Backward
 			if (!world.isChunkBlockCoordOccupied(worldBlockCoord - FORWARD_DIR))
 			{
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), sideTextureIdx);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(0, 0), sideTextureIdx);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), sideTextureIdx, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(0, 0), sideTextureIdx, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), sideTextureIdx, textureSheetDims);
 
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), sideTextureIdx);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(1, 1), sideTextureIdx);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), sideTextureIdx);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), sideTextureIdx, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(1, 1), sideTextureIdx, textureSheetDims);
+				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), sideTextureIdx, textureSheetDims);
 			}
 		}
 
@@ -373,6 +384,20 @@ namespace Okay
 		D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = pDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
 		cpuHandle.ptr += slotIdx * (uint64_t)m_cbvSrvUavIncrementSize;
 		m_pDevice->CreateShaderResourceView(pResource, pDesc, cpuHandle);
+
+		// returns for convenience
+		D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = pDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
+		gpuHandle.ptr += slotIdx * (uint64_t)m_cbvSrvUavIncrementSize;
+		return gpuHandle;
+	}
+
+	D3D12_GPU_DESCRIPTOR_HANDLE Renderer::createUAVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_UNORDERED_ACCESS_VIEW_DESC* pDesc)
+	{
+		OKAY_ASSERT(pResource || pDesc);
+
+		D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = pDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+		cpuHandle.ptr += slotIdx * (uint64_t)m_cbvSrvUavIncrementSize;
+		m_pDevice->CreateUnorderedAccessView(pResource, nullptr, pDesc, cpuHandle);
 
 		// returns for convenience
 		D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = pDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
@@ -579,20 +604,23 @@ namespace Okay
 		return pResource;
 	}
 
-	ID3D12Resource* Renderer::createSRVTexture(const FilePath& filePath, FrameResources& frame, std::wstring_view name)
+	ID3D12Resource* Renderer::createTextureSheet(const FilePath& filePath, FrameResources& frame, uint32_t padding, uint32_t tileSize, std::wstring_view name)
 	{
 		int textureWidth = 0;
 		int textureHeight = 0;
 		uint8_t* pTextureData = stbi_load(filePath.string().c_str(), &textureWidth, &textureHeight, nullptr, STBI_rgb_alpha);
 		OKAY_ASSERT(pTextureData);
 
+		uint32_t numXTiles = textureWidth / tileSize;
+		uint32_t numYTiles = textureHeight / tileSize;
+
 		D3D12_RESOURCE_DESC desc = {};
 		desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
 		desc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
-		desc.Width = (uint64_t)textureWidth;
-		desc.Height = (uint32_t)textureHeight;
+		desc.Width = (uint64_t)textureWidth + (numXTiles - 1ull) * padding;
+		desc.Height = (uint32_t)textureHeight + (numYTiles - 1ull) * padding;
 		desc.DepthOrArraySize = 1;
-		desc.MipLevels = 1; // TODO: Mips
+		desc.MipLevels = 0; // 0 means max possible mipLevels (ID3D12Resource::GetDesc().MipLevels will be set to the real value)
 		desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 		desc.SampleDesc.Count = 1;
 		desc.SampleDesc.Quality = 0;
@@ -610,41 +638,239 @@ namespace Okay
 		DX_CHECK(m_pDevice->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&pTexture)));
 
 		pTexture->SetName(name.data());
-		uploadTextureData(pTexture, pTextureData, frame);
-		transitionResource(frame.pCommandList, pTexture, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+		uploadTextureSheetData(pTexture, frame, pTextureData, (uint32_t)textureWidth, (uint32_t)textureHeight, padding, tileSize);
+		transitionResource(frame.pCommandList, pTexture, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON);
 
 		return pTexture;
-	}
+	}	
 
-	void Renderer::uploadTextureData(ID3D12Resource* pTarget, uint8_t* pTextureData, FrameResources& frame)
+	void Renderer::uploadTextureSheetData(ID3D12Resource* pTarget, FrameResources& frame, uint8_t* pTextureData, uint32_t origTextureWidth, uint32_t origTextureHeight, uint32_t padding, uint32_t tileSize)
 	{
 		D3D12_RESOURCE_DESC resourceDesc = pTarget->GetDesc();
 		D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
 		uint64_t rowSizeInBytes = INVALID_UINT64;
 		uint64_t totalSizeInBytes = INVALID_UINT64;
-
 		m_pDevice->GetCopyableFootprints(&resourceDesc, 0, 1, 0, &footprint, nullptr, &rowSizeInBytes, &totalSizeInBytes);
+
+		uint32_t numXTiles = origTextureWidth / tileSize;
+		uint32_t numYTiles = origTextureHeight / tileSize;
+		uint32_t sourceTextureRowPitch = tileSize * numXTiles * 4;
 
 		uint8_t* pMappedBuffer = frame.ringBuffer.map();
 
-		for (uint32_t i = 0; i < resourceDesc.Height; i++)
+
+		// Copy source texture data into ringBuffer, taking padding into consideration
+		for (uint32_t yTex = 0; yTex < numYTiles; yTex++)
 		{
-			memcpy(pMappedBuffer + i * footprint.Footprint.RowPitch, pTextureData + i * rowSizeInBytes, rowSizeInBytes);
+			for (uint32_t xTex = 0; xTex < numXTiles; xTex++)
+			{
+				uint8_t* pTarget = pMappedBuffer +
+					xTex * (tileSize + padding) * 4 +
+					yTex * (tileSize + padding) * footprint.Footprint.RowPitch;
+
+				uint8_t* pSource = pTextureData +
+					xTex * tileSize * 4 +
+					yTex * tileSize * sourceTextureRowPitch;
+
+				for (uint32_t i = 0; i < tileSize; i++)
+				{
+					memcpy(pTarget + i * footprint.Footprint.RowPitch, pSource + i * sourceTextureRowPitch, tileSize * 4ull);
+				}
+			}
 		}
 
-		D3D12_TEXTURE_COPY_LOCATION source = {};
-		source.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-		source.PlacedFootprint = footprint;
-		source.PlacedFootprint.Offset = frame.ringBuffer.getOffset();
-		source.pResource = frame.ringBuffer.getDXResource();
+		// Fill in column padding
+		for (uint32_t xTex = 0; xTex < numXTiles - 1; xTex++)
+		{
+			uint8_t* pTarget = pMappedBuffer + tileSize * 4 + (xTex * (tileSize + padding) * 4);
+			uint8_t* pSource = pTarget - 4;
 
-		D3D12_TEXTURE_COPY_LOCATION dest = {};
-		dest.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-		dest.SubresourceIndex = 0;
-		dest.pResource = pTarget;
+			for (uint32_t j = 0; j < padding / 2; j++)
+			{
+				for (uint32_t i = 0; i < resourceDesc.Height; i++)
+				{
+					memcpy(pTarget + i * footprint.Footprint.RowPitch + j * 4, pSource + i * footprint.Footprint.RowPitch, 4ull);
+				}
+			}
 
-		frame.pCommandList->CopyTextureRegion(&dest, 0, 0, 0, &source, nullptr);
+			pTarget += (padding / 2) * 4;
+			pSource = pTarget + padding * 2;
+
+			for (uint32_t j = 0; j < padding / 2; j++)
+			{
+				for (uint32_t i = 0; i < resourceDesc.Height; i++)
+				{
+					memcpy(pTarget + i * footprint.Footprint.RowPitch + j * 4, pSource + i * footprint.Footprint.RowPitch, 4ull);
+				}
+			}
+		}
+
+		// Fill in row padding
+		for (uint32_t yTex = 0; yTex < numYTiles - 1; yTex++)
+		{
+			uint8_t* pTarget = pMappedBuffer + tileSize * footprint.Footprint.RowPitch + (yTex * (tileSize + padding) * footprint.Footprint.RowPitch);
+			uint8_t* pSource = pTarget - footprint.Footprint.RowPitch;
+
+			for (uint32_t i = 0; i < padding / 2; i++)
+			{
+				memcpy(pTarget + i * footprint.Footprint.RowPitch, pSource, rowSizeInBytes);
+			}
+
+			pTarget += (padding / 2) * footprint.Footprint.RowPitch;
+			pSource = pTarget + (padding / 2) * footprint.Footprint.RowPitch;
+
+			for (uint32_t i = 0; i < padding / 2; i++)
+			{
+				memcpy(pTarget + i * footprint.Footprint.RowPitch, pSource, rowSizeInBytes);
+			}
+		}
+
+
+		D3D12_TEXTURE_COPY_LOCATION copySource = {};
+		copySource.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+		copySource.PlacedFootprint = footprint;
+		copySource.PlacedFootprint.Offset = frame.ringBuffer.getOffset();
+		copySource.pResource = frame.ringBuffer.getDXResource();
+
+		D3D12_TEXTURE_COPY_LOCATION copyDest = {};
+		copyDest.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		copyDest.SubresourceIndex = 0;
+		copyDest.pResource = pTarget;
+
+		frame.pCommandList->CopyTextureRegion(&copyDest, 0, 0, 0, &copySource, nullptr);
 		frame.ringBuffer.unmap();
+	}
+
+	void Renderer::generateTextureSheetMipMaps(ID3D12Resource* pTextureSheet, uint32_t tileSize)
+	{
+		D3D12_RESOURCE_DESC textureDesc = pTextureSheet->GetDesc();
+
+		ID3D12RootSignature* pComputeSignature = nullptr;
+		ID3D12PipelineState* pComputePSO = nullptr;
+		{
+			D3D12_DESCRIPTOR_RANGE descRange[] =
+			{
+				createRangeSRV(0, 0, 1, 0),
+				createRangeUAV(0, 0, 1, 1),
+			};
+			D3D12_ROOT_PARAMETER rootParam = createRootParamTable(D3D12_SHADER_VISIBILITY_ALL, descRange, _countof(descRange));
+
+			D3D12_STATIC_SAMPLER_DESC samplerDesc = createDefaultStaticPointSamplerDesc();
+			samplerDesc.Filter = D3D12_FILTER_ANISOTROPIC;
+			samplerDesc.MaxAnisotropy = 16;
+			samplerDesc.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+			samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+			samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+			samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+
+			D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
+			rootDesc.NumParameters = 1;
+			rootDesc.pParameters = &rootParam;
+			rootDesc.NumStaticSamplers = 1;
+			rootDesc.pStaticSamplers = &samplerDesc;
+			rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+
+			pComputeSignature = createRootSignature(&rootDesc, L"TextureSheetMipMap");
+		
+
+			ID3DBlob* pShaderBlob = nullptr;
+			D3D12_COMPUTE_PIPELINE_STATE_DESC pipelineDesc = {};
+			pipelineDesc.pRootSignature = pComputeSignature;
+			pipelineDesc.CS = compileShader(SHADER_PATH / "TextureSheetMipMapCS.hlsl", "cs_5_1", &pShaderBlob);
+			pipelineDesc.NodeMask = 0;
+			pipelineDesc.CachedPSO.pCachedBlob = nullptr;
+			pipelineDesc.CachedPSO.CachedBlobSizeInBytes = 0;
+			pipelineDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
+			DX_CHECK(m_pDevice->CreateComputePipelineState(&pipelineDesc, IID_PPV_ARGS(&pComputePSO)));
+			D3D12_RELEASE(pShaderBlob);
+		}
+
+
+		ID3D12DescriptorHeap* pDescriptorHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, textureDesc.MipLevels * 2, true, L"MipMapTextureSheet");
+		ID3D12Resource* pUAVTexture = nullptr;
+		{
+			D3D12_HEAP_PROPERTIES heapProperties = {};
+			heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+			heapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+			heapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+			heapProperties.CreationNodeMask = 0;
+			heapProperties.VisibleNodeMask = 0;
+			textureDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+			DX_CHECK(m_pDevice->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &textureDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&pUAVTexture)));
+		}
+
+
+		ID3D12GraphicsCommandList* pComputeList = nullptr;
+		ID3D12CommandAllocator* pComputeAllocator = nullptr;
+		DX_CHECK(m_pDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&pComputeAllocator)));
+		DX_CHECK(m_pDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, pComputeAllocator, nullptr, IID_PPV_ARGS(&pComputeList)));
+
+		ID3D12Fence* pComputeFence = nullptr;
+		uint64_t fenceValue = 0;
+		DX_CHECK(m_pDevice->CreateFence(fenceValue, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&pComputeFence)));
+
+
+		D3D12_UNORDERED_ACCESS_VIEW_DESC targetUAV = {};
+		D3D12_SHADER_RESOURCE_VIEW_DESC sourceSRV = {};
+		{
+			targetUAV.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+			targetUAV.Texture2D.PlaneSlice = 0;
+			targetUAV.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+			sourceSRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+			sourceSRV.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+			sourceSRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+			sourceSRV.Texture2D.MipLevels = 1;
+			sourceSRV.Texture2D.PlaneSlice = 0;
+			sourceSRV.Texture2D.ResourceMinLODClamp = 0;
+		}
+
+
+		transitionResource(pComputeList, pTextureSheet, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_SOURCE);	
+		pComputeList->CopyResource(pUAVTexture, pTextureSheet);
+		
+		transitionResource(pComputeList, pUAVTexture, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+		transitionResource(pComputeList, pTextureSheet, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+		
+		pComputeList->SetComputeRootSignature(pComputeSignature);
+		pComputeList->SetPipelineState(pComputePSO);
+		pComputeList->SetDescriptorHeaps(1, &pDescriptorHeap);
+
+		for (uint32_t i = 0; i < textureDesc.MipLevels - 1u; i++)
+		{
+			sourceSRV.Texture2D.MostDetailedMip = i;
+			targetUAV.Texture2D.MipSlice = i + 1;
+
+			D3D12_GPU_DESCRIPTOR_HANDLE descriptor0Handle = createSRVDescriptor(pDescriptorHeap, (i * 2), pUAVTexture, &sourceSRV);
+			createUAVDescriptor(pDescriptorHeap, (i * 2) + 1, pUAVTexture, &targetUAV); // Descriptor 1 Handle
+
+			uint32_t mipWidth = glm::max(1u, (uint32_t)textureDesc.Width / (uint32_t)glm::pow(2, i));
+			uint32_t mipHeight = glm::max(1u, textureDesc.Height / (uint32_t)glm::pow(2, i));
+			uint32_t xGroups = (uint32_t)glm::ceil(mipWidth / 16.f);
+			uint32_t yGroups = (uint32_t)glm::ceil(mipHeight / 16.f);
+
+			transitionResource(pComputeList, pUAVTexture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, i);
+			pComputeList->SetComputeRootDescriptorTable(0, descriptor0Handle);
+			pComputeList->Dispatch(xGroups, yGroups, 1);
+		}
+
+		transitionResource(pComputeList, pUAVTexture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, textureDesc.MipLevels - 1);
+		transitionResource(pComputeList, pUAVTexture, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+
+		transitionResource(pComputeList, pTextureSheet, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+		pComputeList->CopyResource(pTextureSheet, pUAVTexture);
+		transitionResource(pComputeList, pTextureSheet, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON);
+
+		flush(pComputeList, pComputeAllocator, pComputeFence, fenceValue);
+
+		D3D12_RELEASE(pComputeAllocator);
+		D3D12_RELEASE(pComputeList);
+		D3D12_RELEASE(pComputeSignature);
+		D3D12_RELEASE(pComputePSO);
+		D3D12_RELEASE(pDescriptorHeap);
+		D3D12_RELEASE(pUAVTexture);
+		D3D12_RELEASE(pComputeFence);
 	}
 
 	ID3D12RootSignature* Renderer::createRootSignature(const D3D12_ROOT_SIGNATURE_DESC* pDesc, std::wstring_view name)
@@ -680,6 +906,8 @@ namespace Okay
 		rootParams.emplace_back(createRootParamTable(D3D12_SHADER_VISIBILITY_PIXEL, &textureRange, 1));
 
 		D3D12_STATIC_SAMPLER_DESC pointSampler = createDefaultStaticPointSamplerDesc();
+		pointSampler.Filter = D3D12_FILTER_MIN_MAG_POINT_MIP_LINEAR;
+		pointSampler.MaxLOD = 4;
 
 		D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
 		rootDesc.NumParameters = (uint32_t)rootParams.size();
