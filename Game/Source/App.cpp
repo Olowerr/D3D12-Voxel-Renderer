@@ -28,6 +28,11 @@ void App::onUpdate(TimeStep dt)
 		static std::string windowTitle;
 		windowTitle = "D3D12 Voxel Renderer | Fps: " + std::to_string((uint32_t)glm::round(1.f / averageFps));
 		m_window.setWindowTitle(windowTitle);
+
+		glm::vec3 camPos = m_world.getCamera().transform.position;
+		glm::ivec2 chunkCoord = chunkIDToChunkCoord(blockCoordToChunkID(camPos));
+
+		printf("(%d, %d) | (%.1f, %.1f, %.1f)\n", chunkCoord.x, chunkCoord.y, camPos.x, camPos.y, camPos.z);
 	}
 }
 
@@ -45,13 +50,13 @@ void App::updateCamera(TimeStep dt)
 	}
 
 	Transform& camTransform = m_world.getCamera().transform;
-	float camMoveSpeed = 150.f;
+	float camMoveSpeed = Input::isKeyDown(Key::L_SHIFT) ? 50.f : 16.f;
 	float camRotSpeed = 0.1f;
 
 	// Movement
 	float forwardDir = (float)Input::isKeyDown(Key::W) - (float)Input::isKeyDown(Key::S);
 	float rightDir = (float)Input::isKeyDown(Key::D) - (float)Input::isKeyDown(Key::A);
-	float upDir = (float)Input::isKeyDown(Key::SPACE) - (float)Input::isKeyDown(Key::L_SHIFT);
+	float upDir = (float)Input::isKeyDown(Key::SPACE) - (float)Input::isKeyDown(Key::L_CTRL);
 
 	glm::vec3 moveDir = glm::vec3(0.f);
 
@@ -65,7 +70,7 @@ void App::updateCamera(TimeStep dt)
 	}
 	if (upDir)
 	{
-		moveDir += camTransform.upVec() * upDir;
+		moveDir += glm::vec3(0.f, 1.f, 0.f) * upDir;
 	}
 
 	if (forwardDir || rightDir || upDir)

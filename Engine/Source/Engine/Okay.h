@@ -21,7 +21,11 @@
 namespace Okay
 {
 	typedef std::filesystem::path FilePath;
+	typedef uint64_t ChunkID;
+
 	inline const FilePath RESOURCES_PATH = FilePath("..") / "Engine" / "resources";
+
+	constexpr ChunkID INVALID_CHUNK_ID = UINT64_MAX;
 
 	constexpr uint8_t  INVALID_UINT8 = UINT8_MAX;
 	constexpr uint16_t INVALID_UINT16 = UINT16_MAX;
@@ -38,7 +42,6 @@ namespace Okay
 	constexpr glm::ivec3 UP_DIR = glm::ivec3(0, 1, 0);
 	constexpr glm::ivec3 FORWARD_DIR = glm::ivec3(0, 0, 1);
 
-	typedef uint64_t ChunkID;
 
 	struct Chunk // Chunk block coordinate system order: X -> Y -> Z
 	{
@@ -101,6 +104,12 @@ namespace Okay
 		chunkBlockCoord.z = (int32_t((glm::ceil(glm::abs(blockCoord.z) / (float)CHUNK_WIDTH)) * CHUNK_WIDTH) + blockCoord.z) % CHUNK_WIDTH;;
 
 		return chunkBlockCoord;
+	}
+
+	constexpr glm::ivec3 chunkBlockCoordToBlockCoord(ChunkID chunkID, const glm::ivec3& chunkBlockCoord)
+	{
+		glm::ivec3 chunkWorldCoord = chunkCoordToWorldCoord(chunkIDToChunkCoord(chunkID));
+		return chunkWorldCoord + chunkBlockCoord;
 	}
 
 	inline bool readBinary(const FilePath& binPath, std::string& output)

@@ -65,8 +65,6 @@ namespace Okay
 			initializeFrameResources(frame, 100'000'000);
 	
 		createVoxelRenderPass();
-		m_pMeshResource = createCommittedBuffer(100'000'000, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE, D3D12_HEAP_TYPE_DEFAULT, L"MeshBuffer");
-		m_meshResourceOffset = 0;
 
 		FrameResources initFrame;
 		initializeFrameResources(initFrame, 100'000);
@@ -92,19 +90,25 @@ namespace Okay
 
 		D3D12_RELEASE(m_pVoxelRootSignature);
 		D3D12_RELEASE(m_pVoxelPSO);
-		D3D12_RELEASE(m_pMeshResource);
 		D3D12_RELEASE(m_pTextureSheet);
 
 		D3D12_RELEASE(m_pRTVDescHeap);
 		D3D12_RELEASE(m_pDSVDescHeap);
 		D3D12_RELEASE(m_pTextureDescHeap);
+
+		for (DXChunk& dxChunk : m_dxChunks)
+		{
+			D3D12_RELEASE(dxChunk.pMeshResource);
+		}
 	}
 
 	void Renderer::render(const World& world)
 	{
 		FrameResources& frame = m_frames[m_pSwapChain->GetCurrentBackBufferIndex()];
 		wait(frame.pFence, frame.fenceValue);
+
 		reset(frame.pCommandAllocator, frame.pCommandList);
+		clearFrameGarbage();
 
 		frame.ringBuffer.jumpToStart();
 		frame.ringBuffer.map();
@@ -127,16 +131,7 @@ namespace Okay
 		FrameResources& frame = m_frames[m_pSwapChain->GetCurrentBackBufferIndex()];
 		m_renderDataGVA = frame.ringBuffer.allocate(&renderData, sizeof(renderData));
 
-		const std::vector<ChunkID>& newChunks = world.getNewChunks();
-		if (newChunks.size())
-		{
-			transitionResource(frame.pCommandList, m_pMeshResource, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
-			for (ChunkID chunkId : newChunks)
-			{
-				writeChunkDataToGPU(world, chunkId, frame);
-			}
-			transitionResource(frame.pCommandList, m_pMeshResource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
-		}
+		updateChunks(frame, world);
 	}
 
 	void Renderer::preRender()
@@ -166,10 +161,9 @@ namespace Okay
 		frame.pCommandList->RSSetScissorRects(1, &m_scissorRect);
 		frame.pCommandList->OMSetRenderTargets(1, &frame.cpuBackBufferRTV, false, &frame.cpuDepthTextureDSV);
 
-		D3D12_GPU_VIRTUAL_ADDRESS chunksMeshGVA = m_pMeshResource->GetGPUVirtualAddress();
 		for (const DXChunk& dxChunk : m_dxChunks)
 		{
-			frame.pCommandList->SetGraphicsRootShaderResourceView(1, chunksMeshGVA + dxChunk.resourceOffset);
+			frame.pCommandList->SetGraphicsRootShaderResourceView(1, dxChunk.pMeshResource->GetGPUVirtualAddress());
 			frame.pCommandList->DrawInstanced(dxChunk.vertexCount, 1, 0, 0);
 		}
 	}
@@ -223,6 +217,24 @@ namespace Okay
 		reset(pCommandAlloator, pCommandList);
 	}
 
+	void Renderer::addToFrameGarbage(IUnknown* pDxUnknown)
+	{
+		m_frameGarbage.emplace_back(m_pSwapChain->GetCurrentBackBufferIndex(), pDxUnknown);
+	}
+
+	void Renderer::clearFrameGarbage()
+	{
+		uint32_t currentFrameIdx = m_pSwapChain->GetCurrentBackBufferIndex();
+		for (int i = (int)m_frameGarbage.size() - 1; i >= 0; i--)
+		{
+			if (m_frameGarbage[i].frameIdx == currentFrameIdx)
+			{
+				D3D12_RELEASE(m_frameGarbage[i].pDxUnknown);
+				m_frameGarbage.erase(m_frameGarbage.begin() + i);
+			}
+		}
+	}
+
 	void Renderer::transitionResource(ID3D12GraphicsCommandList* pCommandList, ID3D12Resource* pResource, D3D12_RESOURCE_STATES beforeState, D3D12_RESOURCE_STATES newState, uint32_t subResource)
 	{
 		D3D12_RESOURCE_BARRIER barrier = {};
@@ -248,6 +260,27 @@ namespace Okay
 
 		if (!mapped)
 			frame.ringBuffer.unmap();
+	}
+
+	void Renderer::updateChunks(FrameResources& frame, const World& world)
+	{
+		for (ChunkID chunkID : world.getRemovedChunks())
+		{
+			for (uint64_t i = 0; i < m_dxChunks.size(); i++)
+			{
+				if (m_dxChunks[i].chunkID == chunkID)
+				{
+					addToFrameGarbage(m_dxChunks[i].pMeshResource);
+					m_dxChunks.erase(m_dxChunks.begin() + i);
+					break;
+				}
+			}
+		}
+
+		for (ChunkID chunkId : world.getNewChunks())
+		{
+			writeChunkDataToGPU(world, chunkId, frame);
+		}
 	}
 
 	void Renderer::writeChunkDataToGPU(const World& world, ChunkID chunkId, FrameResources& frame)
@@ -346,13 +379,15 @@ namespace Okay
 			}
 		}
 
-		DXChunk& dxChunk = m_dxChunks.emplace_back();
-		dxChunk.resourceOffset = m_meshResourceOffset;
-		dxChunk.vertexCount = (uint32_t)meshData.size();
-
 		uint64_t meshDataSize = meshData.size() * sizeof(Vertex);
-		updateDefaultHeapResource(m_pMeshResource, m_meshResourceOffset, frame, meshData.data(), meshDataSize);
-		m_meshResourceOffset += meshDataSize; // align?
+
+		DXChunk& dxChunk = m_dxChunks.emplace_back();
+		dxChunk.vertexCount = (uint32_t)meshData.size();
+		dxChunk.chunkID = chunkId;
+		dxChunk.pMeshResource = createCommittedBuffer(meshDataSize, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_HEAP_TYPE_DEFAULT, L"MeshBuffer" + std::to_wstring(chunkId));
+
+		updateDefaultHeapResource(dxChunk.pMeshResource, 0, frame, meshData.data(), meshDataSize);
+		transitionResource(frame.pCommandList, dxChunk.pMeshResource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
 	}
 
 	D3D12_CPU_DESCRIPTOR_HANDLE Renderer::createRTVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc)

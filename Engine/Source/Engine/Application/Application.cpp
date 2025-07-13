@@ -30,10 +30,9 @@ namespace Okay
 			m_window.processMessages();
 
 			onUpdate(timeStep);
+			m_world.update();
 
 			m_renderer.render(m_world);
-
-			m_world.clearNewChunks();
 		}
 	}
 }
