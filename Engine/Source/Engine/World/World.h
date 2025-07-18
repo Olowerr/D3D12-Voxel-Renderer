@@ -16,7 +16,8 @@ namespace Okay
 		void update();
 
 		bool isChunkBlockCoordOccupied(const glm::ivec3& blockCoord) const;
-		
+		uint8_t tryGetBlock(ChunkID chunkID, uint32_t blockIdx) const;
+
 		Chunk& getChunk(ChunkID chunkID);
 		const Chunk& getChunkConst(ChunkID chunkID) const;
 
@@ -37,7 +38,7 @@ namespace Okay
 		void unloadChunkIfLoaded(ChunkID chunkID);
 
 		void clearUpdatedChunks();
-		bool isChunkWithinRenderDistance(const glm::ivec2& chunkCoord);
+		bool isChunkWithinRenderDistance(const glm::ivec2& chunkCoord) const;
 
 	private:
 		Camera m_camera;

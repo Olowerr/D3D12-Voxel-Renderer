@@ -7,33 +7,9 @@
 
 namespace Okay
 {
-	constexpr uint32_t TEXTURE_SHEET_TILE_SIZE = 16;
-	constexpr uint32_t TEXTURE_SHEET_PADDING = 8;
-
 	struct RenderData
 	{
 		glm::mat4 viewProjMatrix = glm::mat4(1.f);
-	};
-
-	struct Vertex
-	{
-		Vertex() = default;
-		Vertex(const glm::vec3& position, const glm::vec2& globalUV, uint32_t textureID, const glm::uvec2& sheetDims)
-			:position(position)
-		{
-			// This calculation breaks if sheetDims.x == TILE_SIZE but it's okay :3
-			uint32_t numXTextures = sheetDims.x / (TEXTURE_SHEET_TILE_SIZE + TEXTURE_SHEET_PADDING / 2);
-
-			glm::vec2 tileCoords = glm::vec2(textureID % numXTextures, textureID / numXTextures);
-			glm::vec2 invSheetDims = 1.f / (glm::vec2)sheetDims;
-
-			uv = globalUV;
-			uv *= invSheetDims * (float)TEXTURE_SHEET_TILE_SIZE;
-			uv += tileCoords * float(TEXTURE_SHEET_TILE_SIZE + TEXTURE_SHEET_PADDING) * invSheetDims;
-		}
-
-		glm::vec3 position = glm::vec3(0.f);
-		glm::vec2 uv = glm::vec2(0.f);
 	};
 
 	void Renderer::initialize(const Window& window)
@@ -81,8 +57,20 @@ namespace Okay
 
 	void Renderer::shutdown()
 	{
+		for (ChunkGeneration& chunkGen : m_chunkGeneration)
+			chunkGen.genThread.join();
+
 		for (FrameResources& frame : m_frames)
 			shutdowFrameResources(frame);
+
+		for (FrameGarbage& frameGarbage : m_frameGarbage)
+			D3D12_RELEASE(frameGarbage.pDxUnknown);
+
+		for (DXChunk& dxChunk : m_dxChunks)
+		{
+			D3D12_RELEASE(dxChunk.pMeshResource);
+			D3D12_RELEASE(dxChunk.pIndicesResource);
+		}
 
 		D3D12_RELEASE(m_pDevice);
 		D3D12_RELEASE(m_pCommandQueue);
@@ -95,11 +83,6 @@ namespace Okay
 		D3D12_RELEASE(m_pRTVDescHeap);
 		D3D12_RELEASE(m_pDSVDescHeap);
 		D3D12_RELEASE(m_pTextureDescHeap);
-
-		for (DXChunk& dxChunk : m_dxChunks)
-		{
-			D3D12_RELEASE(dxChunk.pMeshResource);
-		}
 	}
 
 	void Renderer::render(const World& world)
@@ -163,8 +146,9 @@ namespace Okay
 
 		for (const DXChunk& dxChunk : m_dxChunks)
 		{
+			frame.pCommandList->IASetIndexBuffer(&dxChunk.indicesView);
 			frame.pCommandList->SetGraphicsRootShaderResourceView(1, dxChunk.pMeshResource->GetGPUVirtualAddress());
-			frame.pCommandList->DrawInstanced(dxChunk.vertexCount, 1, 0, 0);
+			frame.pCommandList->DrawIndexedInstanced(dxChunk.indicesCount, 1, 0, 0, 0);
 		}
 	}
 
@@ -248,7 +232,7 @@ namespace Okay
 		pCommandList->ResourceBarrier(1, &barrier);
 	}
 
-	void Renderer::updateDefaultHeapResource(ID3D12Resource* pTarget, uint64_t targetOffset, FrameResources& frame, void* pData, uint64_t dataSize)
+	void Renderer::updateDefaultHeapResource(ID3D12Resource* pTarget, uint64_t targetOffset, FrameResources& frame, const void* pData, uint64_t dataSize)
 	{
 		bool mapped = frame.ringBuffer.getMappedPtr();
 		if (!mapped)
@@ -262,132 +246,205 @@ namespace Okay
 			frame.ringBuffer.unmap();
 	}
 
+	static void addVertex(std::vector<uint32_t>& indices, std::vector<Vertex>& meshData, const Vertex& newVertex)
+	{
+		uint32_t idx = INVALID_UINT32;
+		int startIdx = glm::max((int)meshData.size() - 5, 0);
+		for (uint64_t i = startIdx; i < meshData.size(); i++)
+		{
+			if (meshData[i] == newVertex)
+			{
+				idx = (uint32_t)i;
+				break;
+			}
+		}
+
+		if (idx == INVALID_UINT32)
+		{
+			indices.emplace_back((uint32_t)meshData.size());
+			meshData.emplace_back(newVertex);
+		}
+		else
+		{
+			indices.emplace_back(idx);
+		}
+	}
+
+	static void generateChunkMesh(const World* pWorld, ChunkID chunkID, ChunkGenerationData* pChunkGenData, glm::uvec2 textureSheetDims)
+	{
+		glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkID);
+		glm::ivec3 worldCoord = chunkCoordToWorldCoord(chunkCoord);
+
+		std::vector<uint32_t>& indices = pChunkGenData->indices;
+		std::vector<Vertex>& meshData = pChunkGenData->meshData;
+
+		meshData.reserve(MAX_BLOCKS_IN_CHUNK * 36ull);
+		indices.reserve(MAX_BLOCKS_IN_CHUNK * 36ull);
+
+		for (uint32_t i = 0; i < MAX_BLOCKS_IN_CHUNK; i++)
+		{
+			uint8_t block = pWorld->tryGetBlock(chunkID, i);
+			if (block == INVALID_UINT8)
+				break;
+
+			if (block == 0)
+				continue;
+
+			glm::ivec3 chunkBlockCoord = chunkBlockIdxToChunkBlockCoord(i);
+			glm::ivec3 worldBlockCoord = chunkBlockCoord + worldCoord;
+
+			uint32_t sideTextureIdx = 0; // should not be here but is oki for now :]
+
+			/*
+				I think this can be improved, addVertex doesn't need to be called for EVERY vertex right?
+				tbh it might not even be neccessary at all...
+				since the vertex can only be shared within the quad (since uv coords on other blocks still vary even for vertices with the same pos and textureID)
+				so we KNOW(?) that 2 specific verticies can be shared (where the triangles meet), and the others are unique, RIGHT??
+			*/
+
+			// Top
+			if (!pWorld->isChunkBlockCoordOccupied(worldBlockCoord + UP_DIR))
+			{
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), 2, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 1), 2, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), 2, textureSheetDims));
+
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), 2, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), 2, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), 2, textureSheetDims));
+
+				sideTextureIdx = 1;
+			}
+
+			// Bottom
+			if (!pWorld->isChunkBlockCoordOccupied(worldBlockCoord - UP_DIR))
+			{
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), 0, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 0), 0, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), 0, textureSheetDims));
+
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), 0, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), 0, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), 0, textureSheetDims));
+			}
+
+			// Right
+			if (!pWorld->isChunkBlockCoordOccupied(worldBlockCoord + RIGHT_DIR))
+			{
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), sideTextureIdx, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(1, 0), sideTextureIdx, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), sideTextureIdx, textureSheetDims));
+
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), sideTextureIdx, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), sideTextureIdx, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), sideTextureIdx, textureSheetDims));
+			}
+
+			// Left
+			if (!pWorld->isChunkBlockCoordOccupied(worldBlockCoord - RIGHT_DIR))
+			{
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), sideTextureIdx, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(0, 0), sideTextureIdx, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), sideTextureIdx, textureSheetDims));
+
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(1, 1), sideTextureIdx, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), sideTextureIdx, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), sideTextureIdx, textureSheetDims));
+			}
+
+			// Forward
+			if (!pWorld->isChunkBlockCoordOccupied(worldBlockCoord + FORWARD_DIR))
+			{
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), sideTextureIdx, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 0), sideTextureIdx, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), sideTextureIdx, textureSheetDims));
+
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), sideTextureIdx, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(0, 1), sideTextureIdx, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), sideTextureIdx, textureSheetDims));
+			}
+
+			// Backward
+			if (!pWorld->isChunkBlockCoordOccupied(worldBlockCoord - FORWARD_DIR))
+			{
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), sideTextureIdx, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(0, 0), sideTextureIdx, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), sideTextureIdx, textureSheetDims));
+
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), sideTextureIdx, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(1, 1), sideTextureIdx, textureSheetDims));
+				addVertex(indices, meshData, Vertex(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), sideTextureIdx, textureSheetDims));
+			}
+		}
+
+		pChunkGenData->threadFinished.store(true);
+	}
+
 	void Renderer::updateChunks(FrameResources& frame, const World& world)
 	{
 		for (ChunkID chunkID : world.getRemovedChunks())
 		{
 			for (uint64_t i = 0; i < m_dxChunks.size(); i++)
 			{
-				if (m_dxChunks[i].chunkID == chunkID)
-				{
-					addToFrameGarbage(m_dxChunks[i].pMeshResource);
-					m_dxChunks.erase(m_dxChunks.begin() + i);
-					break;
-				}
+				if (m_dxChunks[i].chunkID != chunkID)
+					continue;
+
+				addToFrameGarbage(m_dxChunks[i].pMeshResource);
+				addToFrameGarbage(m_dxChunks[i].pIndicesResource);
+				m_dxChunks.erase(m_dxChunks.begin() + i);
+				break;
 			}
 		}
 
-		for (ChunkID chunkId : world.getNewChunks())
+		for (ChunkID chunkID : world.getNewChunks())
 		{
-			writeChunkDataToGPU(world, chunkId, frame);
+			glm::uvec2 textureSheetDims = glm::uvec2((uint32_t)m_pTextureSheet->GetDesc().Width, m_pTextureSheet->GetDesc().Height);
+
+			ChunkGeneration& chunkGen = m_chunkGeneration.emplace_back();
+			chunkGen.pChunkGenData = new ChunkGenerationData;
+			chunkGen.pChunkGenData->threadFinished.store(false);
+			chunkGen.pChunkGenData->chunkID = chunkID;
+			chunkGen.genThread =  std::thread(generateChunkMesh, &world, chunkID, chunkGen.pChunkGenData, textureSheetDims);
+		}
+
+		for (int i = (int)m_chunkGeneration.size() - 1; i >= 0; i--)
+		{
+			if (!m_chunkGeneration[i].pChunkGenData->threadFinished.load())
+				continue;
+
+			m_chunkGeneration[i].genThread.join();
+
+			if (world.isChunkLoaded(m_chunkGeneration[i].pChunkGenData->chunkID))
+				writeChunkDataToGPU(m_chunkGeneration[i], frame);
+
+			delete m_chunkGeneration[i].pChunkGenData;
+			m_chunkGeneration.erase(m_chunkGeneration.begin() + i);
 		}
 	}
 
-	void Renderer::writeChunkDataToGPU(const World& world, ChunkID chunkId, FrameResources& frame)
+	void Renderer::writeChunkDataToGPU(const ChunkGeneration& chunkGeneration, FrameResources& frame)
 	{
-		const Chunk& chunk = world.getChunkConst(chunkId);
-		glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkId);
-		glm::ivec3 worldCoord = chunkCoordToWorldCoord(chunkCoord);
-
-		glm::uvec2 textureSheetDims = glm::uvec2((uint32_t)m_pTextureSheet->GetDesc().Width, m_pTextureSheet->GetDesc().Height);
-
-		std::vector<Vertex> meshData;
-		meshData.reserve(MAX_BLOCKS_IN_CHUNK * 36ull); // 36 verticies in a cube (without indices)
-
-		for (uint32_t i = 0; i < MAX_BLOCKS_IN_CHUNK; i++)
-		{
-			if (chunk.blocks[i] == 0)
-				continue;
-			
-			glm::ivec3 chunkBlockCoord = chunkBlockIdxToChunkBlockCoord(i);
-			glm::ivec3 worldBlockCoord = chunkBlockCoord + worldCoord;
-
-			uint32_t sideTextureIdx = 0;
-
-			// Top
-			if (!world.isChunkBlockCoordOccupied(worldBlockCoord + UP_DIR))
-			{
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), 2, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 1), 2, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), 2, textureSheetDims);
-
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), 2, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), 2, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), 2, textureSheetDims);
-
-				sideTextureIdx = 1;
-			}
-
-			// Bottom
-			if (!world.isChunkBlockCoordOccupied(worldBlockCoord - UP_DIR))
-			{
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), 0, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 0), 0, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), 0, textureSheetDims);
-
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), 0, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), 0, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), 0, textureSheetDims);
-			}
-
-			// Right
-			if (!world.isChunkBlockCoordOccupied(worldBlockCoord + RIGHT_DIR))
-			{
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), sideTextureIdx, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(1, 0), sideTextureIdx, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), sideTextureIdx, textureSheetDims);
-
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), sideTextureIdx, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), sideTextureIdx, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), sideTextureIdx, textureSheetDims);
-			}
-
-			// Left
-			if (!world.isChunkBlockCoordOccupied(worldBlockCoord - RIGHT_DIR))
-			{
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), sideTextureIdx, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(0, 0), sideTextureIdx, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), sideTextureIdx, textureSheetDims);
-
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(1, 1), sideTextureIdx, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), sideTextureIdx, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), sideTextureIdx, textureSheetDims);
-			}
-
-			// Forward
-			if (!world.isChunkBlockCoordOccupied(worldBlockCoord + FORWARD_DIR))
-			{
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), sideTextureIdx, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 0), sideTextureIdx, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), sideTextureIdx, textureSheetDims);
-
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), sideTextureIdx, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(0, 1), sideTextureIdx, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), sideTextureIdx, textureSheetDims);
-			}
-
-			// Backward
-			if (!world.isChunkBlockCoordOccupied(worldBlockCoord - FORWARD_DIR))
-			{
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), sideTextureIdx, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(0, 0), sideTextureIdx, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), sideTextureIdx, textureSheetDims);
-
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), sideTextureIdx, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(1, 1), sideTextureIdx, textureSheetDims);
-				meshData.emplace_back(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), sideTextureIdx, textureSheetDims);
-			}
-		}
+		ChunkID chunkID = chunkGeneration.pChunkGenData->chunkID;
+		const std::vector<uint32_t>& indices = chunkGeneration.pChunkGenData->indices;
+		const std::vector<Vertex>& meshData = chunkGeneration.pChunkGenData->meshData;
 
 		uint64_t meshDataSize = meshData.size() * sizeof(Vertex);
+		uint64_t indexDataSize = indices.size() * sizeof(uint32_t);
 
 		DXChunk& dxChunk = m_dxChunks.emplace_back();
-		dxChunk.vertexCount = (uint32_t)meshData.size();
-		dxChunk.chunkID = chunkId;
-		dxChunk.pMeshResource = createCommittedBuffer(meshDataSize, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_HEAP_TYPE_DEFAULT, L"MeshBuffer" + std::to_wstring(chunkId));
+		dxChunk.chunkID = chunkID;
+		dxChunk.indicesCount = (uint32_t)indices.size();
+		dxChunk.pMeshResource = createCommittedBuffer(meshDataSize, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_HEAP_TYPE_DEFAULT, L"MeshBuffer" + std::to_wstring(chunkID));
+		dxChunk.pIndicesResource = createCommittedBuffer(indexDataSize, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_HEAP_TYPE_DEFAULT, L"IndicesBuffer" + std::to_wstring(chunkID));
+
+		dxChunk.indicesView.BufferLocation = dxChunk.pIndicesResource->GetGPUVirtualAddress();
+		dxChunk.indicesView.Format = DXGI_FORMAT_R32_UINT;
+		dxChunk.indicesView.SizeInBytes = (uint32_t)indexDataSize;
 
 		updateDefaultHeapResource(dxChunk.pMeshResource, 0, frame, meshData.data(), meshDataSize);
+		updateDefaultHeapResource(dxChunk.pIndicesResource, 0, frame, indices.data(), indexDataSize);
 		transitionResource(frame.pCommandList, dxChunk.pMeshResource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+		transitionResource(frame.pCommandList, dxChunk.pIndicesResource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDEX_BUFFER);
 	}
 
 	D3D12_CPU_DESCRIPTOR_HANDLE Renderer::createRTVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc)

@@ -1,4 +1,8 @@
 #include "World.h"
+#include <shared_mutex>
+#include <atomic>
+
+#include "../Application/Time.h"
 
 namespace Okay
 {
@@ -21,10 +25,13 @@ namespace Okay
 		for (const auto& chunkIterator : m_chunks)
 		{
 			glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkIterator.first);
-			if (!isChunkWithinRenderDistance(chunkCoord))
+			if (chunkCoord != m_currentCamChunkCoord)
 			{
-				unloadChunk(chunkIterator.first);
-				break;
+				if (!isChunkWithinRenderDistance(chunkCoord))
+				{
+					unloadChunk(chunkIterator.first);
+					break;
+				}
 			}
 		}
 
@@ -59,7 +66,19 @@ namespace Okay
 
 		glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(blockCoord);
 		uint32_t chunkBlockIdx = chunkBlockCoordToChunkBlockIdx(chunkBlockCoord);
+
+		//std::shared_lock lock(pChunk->mutis);
 		return pChunk->blocks[chunkBlockIdx] != 0;
+	}
+
+	uint8_t World::tryGetBlock(ChunkID chunkID, uint32_t blockIdx) const
+	{
+		const Chunk* pChunk = tryGetChunk(chunkID);
+		if (!pChunk)
+			return INVALID_UINT8;
+	
+		//std::shared_lock lock(pChunk->mutis);
+		return pChunk->blocks[blockIdx];
 	}
 
 	Camera& World::getCamera()
@@ -88,10 +107,7 @@ namespace Okay
 	const Chunk* World::tryGetChunk(ChunkID chunkID) const
 	{
 		auto iterator = m_chunks.find(chunkID);
-		if (iterator == m_chunks.end())
-			return nullptr;
-
-		return &iterator->second;
+		return iterator == m_chunks.end() ? nullptr : &iterator->second;
 	}
 
 	bool World::isChunkLoaded(ChunkID chunkID) const
@@ -105,12 +121,11 @@ namespace Okay
 		m_removedChunks.clear();
 	}
 
-	bool World::isChunkWithinRenderDistance(const glm::ivec2& chunkCoord)
+	bool World::isChunkWithinRenderDistance(const glm::ivec2& chunkCoord) const
 	{
-		glm::vec2 chunkMiddle = glm::vec2(chunkCoord) + glm::vec2(CHUNK_WIDTH * 0.5f);
-		glm::vec2 camChunkMiddle = glm::vec2(m_currentCamChunkCoord) + glm::vec2(CHUNK_WIDTH * 0.5f);
-
-		return glm::length2(chunkMiddle - camChunkMiddle) < RENDER_DISTNACE * RENDER_DISTNACE;
+		glm::vec2 chunkMiddle = glm::vec2(chunkCoord);
+		glm::vec2 camChunkMiddle = glm::vec2(m_currentCamChunkCoord);
+		return glm::length2(chunkMiddle - camChunkMiddle) < RENDER_DISTNACE * RENDER_DISTNACE; // wrong lmao
 	}
 
 	const std::vector<ChunkID>& World::getNewChunks() const
@@ -126,6 +141,7 @@ namespace Okay
 	void World::generateChunk(ChunkID chunkID)
 	{
 		Chunk& chunk = getChunk(chunkID);
+		//std::unique_lock lock(chunk.mutis);
 
 		for (uint32_t x = 0; x < CHUNK_WIDTH; x++)
 		{
@@ -133,12 +149,15 @@ namespace Okay
 			{
 				float midHeight = 20.f;
 
-				glm::ivec3 blockCoord = chunkBlockCoordToBlockCoord(chunkID, { x, 0, z });
+				//glm::ivec3 blockCoord = chunkBlockCoordToBlockCoord(chunkID, { x, 0, z });
 
-				float sinHeight = glm::sin(blockCoord.x / 2.f) * 4.f;
-				float cosHeight = glm::cos(blockCoord.z / 2.f) * 4.f;
+				float height1 = glm::sin((x / 15.f) * glm::pi<float>()) * 16.f;
+				float height2 = glm::sin((z / 15.f) * glm::pi<float>()) * 16.f;
 
-				uint32_t columnHeight = (uint32_t)glm::round(midHeight + (sinHeight + cosHeight) * 0.5f);
+				height1 = glm::abs(height1);
+				height2 = glm::abs(height2);
+
+				uint32_t columnHeight = (uint32_t)glm::floor(midHeight + (height1 + height2) * 0.5f);
 
 				for (uint32_t y = 0; y < WORLD_HEIGHT; y++)
 				{

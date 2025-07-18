@@ -12,7 +12,7 @@ struct VoxelVSOutput
 
 struct Vertex
 {
-    float3 position;
+    int3 position;
     float2 uv;
 };
 

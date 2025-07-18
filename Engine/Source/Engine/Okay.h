@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <shared_mutex>
 
 // Will be defined to not check in dist builds
 #define OKAY_ASSERT(condition)																	\
@@ -36,7 +37,7 @@ namespace Okay
 	constexpr uint32_t CHUNK_WIDTH = 16;   // Has to be even
 	constexpr uint32_t MAX_BLOCKS_IN_CHUNK = CHUNK_WIDTH * CHUNK_WIDTH * WORLD_HEIGHT;
 
-	constexpr uint32_t WORLD_CHUNK_WIDTH = 100; // How many chunks the world can have in X & Z directions, has to be even
+	constexpr uint32_t WORLD_CHUNK_WIDTH = 1'000'000; // How many chunks the world can have in X & Z directions, has to be even
 
 	constexpr glm::ivec3 RIGHT_DIR = glm::ivec3(1, 0, 0);
 	constexpr glm::ivec3 UP_DIR = glm::ivec3(0, 1, 0);
@@ -45,6 +46,7 @@ namespace Okay
 
 	struct Chunk // Chunk block coordinate system order: X -> Y -> Z
 	{
+		mutable std::shared_mutex mutis;
 		uint8_t blocks[MAX_BLOCKS_IN_CHUNK] = {};
 	};
 

@@ -1,8 +1,14 @@
 #pragma once
 #include "RingBuffer.h"
 
+#include <thread>
+#include <atomic>
+
 namespace Okay
 {
+	constexpr uint32_t TEXTURE_SHEET_TILE_SIZE = 16;
+	constexpr uint32_t TEXTURE_SHEET_PADDING = 8;
+
 	class Window;
 	class World;
 	struct Chunk;
@@ -27,10 +33,52 @@ namespace Okay
 	struct DXChunk
 	{
 		ChunkID chunkID = INVALID_CHUNK_ID;
-		uint32_t vertexCount = INVALID_UINT32;
+		uint32_t indicesCount = INVALID_UINT32;
+		D3D12_INDEX_BUFFER_VIEW indicesView = {};
 
 		// Temp, should be 1 big buffer for all chunks but then we need to handle memory fragmentation
 		ID3D12Resource* pMeshResource = nullptr;
+		ID3D12Resource* pIndicesResource = nullptr;
+	};
+
+	struct Vertex
+	{
+		Vertex() = default;
+		Vertex(const glm::ivec3& position, const glm::vec2& globalUV, uint32_t textureID, const glm::uvec2& sheetDims)
+			:position(position)
+		{
+			// This calculation breaks if sheetDims.x == TILE_SIZE but it's okay :3
+			uint32_t numXTextures = sheetDims.x / (TEXTURE_SHEET_TILE_SIZE + TEXTURE_SHEET_PADDING / 2);
+
+			glm::vec2 tileCoords = glm::vec2(textureID % numXTextures, textureID / numXTextures);
+			glm::vec2 invSheetDims = 1.f / (glm::vec2)sheetDims;
+
+			uv = globalUV;
+			uv *= invSheetDims * (float)TEXTURE_SHEET_TILE_SIZE;
+			uv += tileCoords * float(TEXTURE_SHEET_TILE_SIZE + TEXTURE_SHEET_PADDING) * invSheetDims;
+		}
+
+		bool operator==(const Vertex& other)
+		{
+			return position == other.position && uv == other.uv;
+		}
+
+		glm::ivec3 position = glm::ivec3(0);
+		glm::vec2 uv = glm::vec2(0.f);
+	};
+
+	struct ChunkGenerationData
+	{
+		ChunkID chunkID;
+		std::atomic<bool> threadFinished;
+		std::vector<uint32_t> indices;
+		std::vector<Vertex> meshData;
+	};
+
+	struct ChunkGeneration
+	{
+		std::thread genThread;
+		ChunkGenerationData* pChunkGenData;
 	};
 
 	struct FrameGarbage
@@ -74,10 +122,10 @@ namespace Okay
 		void clearFrameGarbage();
 
 		void transitionResource(ID3D12GraphicsCommandList* pCommandList, ID3D12Resource* pResource, D3D12_RESOURCE_STATES beforeState, D3D12_RESOURCE_STATES newState, uint32_t subResource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
-		void updateDefaultHeapResource(ID3D12Resource* pTarget, uint64_t targetOffset, FrameResources& frame, void* pData, uint64_t dataSize);
+		void updateDefaultHeapResource(ID3D12Resource* pTarget, uint64_t targetOffset, FrameResources& frame, const void* pData, uint64_t dataSize);
 
 		void updateChunks(FrameResources& frame, const World& world);
-		void writeChunkDataToGPU(const World& world, ChunkID chunkId, FrameResources& frame);
+		void writeChunkDataToGPU(const ChunkGeneration& chunkGeneration, FrameResources& frame);
 
 		D3D12_CPU_DESCRIPTOR_HANDLE createRTVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc);
 		D3D12_CPU_DESCRIPTOR_HANDLE createDSVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_DEPTH_STENCIL_VIEW_DESC* pDesc);
@@ -125,6 +173,7 @@ namespace Okay
 		D3D12_GPU_VIRTUAL_ADDRESS m_renderDataGVA = INVALID_UINT64;
 
 		std::vector<DXChunk> m_dxChunks;
+		std::vector<ChunkGeneration> m_chunkGeneration;
 
 		ID3D12Resource* m_pTextureSheet = nullptr;
 		D3D12_GPU_DESCRIPTOR_HANDLE m_textureHandle = {};
