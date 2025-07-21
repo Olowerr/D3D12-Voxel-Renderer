@@ -1,5 +1,6 @@
 #pragma once
 #include "RingBuffer.h"
+#include "ResourceArena.h"
 
 #include <thread>
 #include <atomic>
@@ -33,12 +34,13 @@ namespace Okay
 	struct DXChunk
 	{
 		ChunkID chunkID = INVALID_CHUNK_ID;
-		uint32_t indicesCount = INVALID_UINT32;
+		
+		D3D12_GPU_VIRTUAL_ADDRESS meshDataGVA = {};
 		D3D12_INDEX_BUFFER_VIEW indicesView = {};
+		uint32_t indicesCount = INVALID_UINT32;
 
-		// Temp, should be 1 big buffer for all chunks but then we need to handle memory fragmentation
-		ID3D12Resource* pMeshResource = nullptr;
-		ID3D12Resource* pIndicesResource = nullptr;
+		ResourceSlot meshDataSlot;
+		ResourceSlot indicesDataSlot;
 	};
 
 	struct Vertex
@@ -69,7 +71,7 @@ namespace Okay
 
 	struct ChunkGenerationData
 	{
-		ChunkID chunkID;
+		ChunkID chunkID = INVALID_CHUNK_ID;
 		std::atomic<bool> threadFinished;
 		std::vector<uint32_t> indices;
 		std::vector<Vertex> meshData;
@@ -78,7 +80,7 @@ namespace Okay
 	struct ChunkGeneration
 	{
 		std::thread genThread;
-		ChunkGenerationData* pChunkGenData;
+		ChunkGenerationData* pChunkGenData = nullptr;
 	};
 
 	struct FrameGarbage
@@ -174,6 +176,9 @@ namespace Okay
 
 		std::vector<DXChunk> m_dxChunks;
 		std::vector<ChunkGeneration> m_chunkGeneration;
+
+		ResourceArena m_meshData;
+		ResourceArena m_indicesData;
 
 		ID3D12Resource* m_pTextureSheet = nullptr;
 		D3D12_GPU_DESCRIPTOR_HANDLE m_textureHandle = {};

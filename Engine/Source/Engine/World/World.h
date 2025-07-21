@@ -24,7 +24,7 @@ namespace Okay
 		const Chunk* tryGetChunk(ChunkID chunkID) const;
 		bool isChunkLoaded(ChunkID chunkID) const;
 
-		const std::vector<ChunkID>& getNewChunks() const;
+		ChunkID getNewlyLoadedChunk() const;
 		const std::vector<ChunkID>& getRemovedChunks() const;
 
 		Camera& getCamera();
@@ -32,22 +32,18 @@ namespace Okay
 
 	private:
 		void generateChunk(ChunkID chunkID);
-		void generateChunkIfNotLoaded(ChunkID chunkID);
-
-		void unloadChunk(ChunkID chunkID);
-		void unloadChunkIfLoaded(ChunkID chunkID);
 
 		void clearUpdatedChunks();
 		bool isChunkWithinRenderDistance(const glm::ivec2& chunkCoord) const;
 
 	private:
 		Camera m_camera;
-		glm::ivec2 m_currentCamChunkCoord;
+		glm::ivec2 m_currentCamChunkCoord = glm::ivec2(0, 0);
 
 		// TODO: Compare performance using std::unordered_map & std::vector for the chunks
 		std::unordered_map<ChunkID, Chunk> m_chunks;
 
-		std::vector<ChunkID> m_newChunks;
+		ChunkID m_newlyLoadedChunk = INVALID_CHUNK_ID;
 		std::vector<ChunkID> m_removedChunks;
 	};
 }

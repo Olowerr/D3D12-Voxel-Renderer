@@ -26,6 +26,7 @@
     <ClInclude Include="Source\Engine\Application\Window.h" />
     <ClInclude Include="Source\Engine\D3D12\OkayD3D12.h" />
     <ClInclude Include="Source\Engine\D3D12\Renderer.h" />
+    <ClInclude Include="Source\Engine\D3D12\ResourceArena.h" />
     <ClInclude Include="Source\Engine\D3D12\RingBuffer.h" />
     <ClInclude Include="Source\Engine\Okay.h" />
     <ClInclude Include="Source\Engine\World\Camera.h" />
@@ -37,6 +38,7 @@
     <ClCompile Include="Source\Engine\Application\Input.cpp" />
     <ClCompile Include="Source\Engine\Application\Window.cpp" />
     <ClCompile Include="Source\Engine\D3D12\Renderer.cpp" />
+    <ClCompile Include="Source\Engine\D3D12\ResourceArena.cpp" />
     <ClCompile Include="Source\Engine\D3D12\RingBuffer.cpp" />
     <ClCompile Include="Source\Engine\World\World.cpp" />
   </ItemGroup>

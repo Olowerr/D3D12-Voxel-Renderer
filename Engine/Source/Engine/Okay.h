@@ -46,7 +46,6 @@ namespace Okay
 
 	struct Chunk // Chunk block coordinate system order: X -> Y -> Z
 	{
-		mutable std::shared_mutex mutis;
 		uint8_t blocks[MAX_BLOCKS_IN_CHUNK] = {};
 	};
 

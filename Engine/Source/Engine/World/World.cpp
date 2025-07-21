@@ -7,10 +7,10 @@
 namespace Okay
 {
 	static const int RENDER_DISTNACE = 8;
+	static std::shared_mutex mutis;
 
 	World::World()
 	{
-		m_currentCamChunkCoord = glm::ivec2(0, 0);
 	}
 
 	World::~World()
@@ -19,20 +19,31 @@ namespace Okay
 
 	void World::update()
 	{
+		std::unique_lock lock(mutis);
+
 		clearUpdatedChunks();
 		m_currentCamChunkCoord = chunkIDToChunkCoord(blockCoordToChunkID(m_camera.transform.position));
 
-		for (const auto& chunkIterator : m_chunks)
+		auto chunkIterator = m_chunks.begin();
+		while (chunkIterator != m_chunks.end())
 		{
-			glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkIterator.first);
-			if (chunkCoord != m_currentCamChunkCoord)
+			ChunkID chunkID = chunkIterator->first;
+			glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkID);
+
+			if (chunkCoord == m_currentCamChunkCoord)
 			{
-				if (!isChunkWithinRenderDistance(chunkCoord))
-				{
-					unloadChunk(chunkIterator.first);
-					break;
-				}
+				++chunkIterator;
+				continue;
 			}
+
+			if (isChunkWithinRenderDistance(chunkCoord))
+			{
+				++chunkIterator;
+				continue;
+			}
+
+			chunkIterator = m_chunks.erase(chunkIterator);
+			m_removedChunks.emplace_back(chunkID);
 		}
 
 		for (int chunkX = -RENDER_DISTNACE; chunkX <= RENDER_DISTNACE; chunkX++)
@@ -40,16 +51,27 @@ namespace Okay
 			for (int chunkZ = -RENDER_DISTNACE; chunkZ <= RENDER_DISTNACE; chunkZ++)
 			{
 				glm::ivec2 chunkCoord = m_currentCamChunkCoord + glm::ivec2(chunkX, chunkZ);
+				ChunkID chunkID = chunkCoordToChunkID(chunkCoord);
+
 				if (chunkCoord == m_currentCamChunkCoord)
 				{
-					generateChunkIfNotLoaded(chunkCoordToChunkID(m_currentCamChunkCoord));
-					continue;
+					if (isChunkLoaded(chunkID))
+						continue;
+
+					generateChunk(chunkID);
+					m_newlyLoadedChunk = chunkID;
+					return;
 				}
 
-				if (isChunkWithinRenderDistance(chunkCoord))
-				{
-					generateChunkIfNotLoaded(chunkCoordToChunkID(chunkCoord));
-				}
+				if (isChunkLoaded(chunkID))
+					continue;
+
+				if (!isChunkWithinRenderDistance(chunkCoord))
+					continue;
+
+				generateChunk(chunkID);
+				m_newlyLoadedChunk = chunkID;
+				return;
 			}
 		}
 	}
@@ -60,6 +82,8 @@ namespace Okay
 			return false;
 
 		ChunkID chunkID = blockCoordToChunkID(blockCoord);
+
+		std::shared_lock lock(mutis);
 		const Chunk* pChunk = tryGetChunk(chunkID);
 		if (!pChunk)
 			return false;
@@ -67,17 +91,16 @@ namespace Okay
 		glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(blockCoord);
 		uint32_t chunkBlockIdx = chunkBlockCoordToChunkBlockIdx(chunkBlockCoord);
 
-		//std::shared_lock lock(pChunk->mutis);
 		return pChunk->blocks[chunkBlockIdx] != 0;
 	}
 
 	uint8_t World::tryGetBlock(ChunkID chunkID, uint32_t blockIdx) const
 	{
+		std::shared_lock lock(mutis);
 		const Chunk* pChunk = tryGetChunk(chunkID);
 		if (!pChunk)
 			return INVALID_UINT8;
 	
-		//std::shared_lock lock(pChunk->mutis);
 		return pChunk->blocks[blockIdx];
 	}
 
@@ -117,7 +140,7 @@ namespace Okay
 
 	void World::clearUpdatedChunks()
 	{
-		m_newChunks.clear();
+		m_newlyLoadedChunk = INVALID_CHUNK_ID;
 		m_removedChunks.clear();
 	}
 
@@ -128,9 +151,9 @@ namespace Okay
 		return glm::length2(chunkMiddle - camChunkMiddle) < RENDER_DISTNACE * RENDER_DISTNACE; // wrong lmao
 	}
 
-	const std::vector<ChunkID>& World::getNewChunks() const
+	ChunkID World::getNewlyLoadedChunk() const
 	{
-		return m_newChunks;
+		return m_newlyLoadedChunk;
 	}
 
 	const std::vector<ChunkID>& World::getRemovedChunks() const
@@ -141,14 +164,11 @@ namespace Okay
 	void World::generateChunk(ChunkID chunkID)
 	{
 		Chunk& chunk = getChunk(chunkID);
-		//std::unique_lock lock(chunk.mutis);
 
 		for (uint32_t x = 0; x < CHUNK_WIDTH; x++)
 		{
 			for (uint32_t z = 0; z < CHUNK_WIDTH; z++)
 			{
-				float midHeight = 20.f;
-
 				//glm::ivec3 blockCoord = chunkBlockCoordToBlockCoord(chunkID, { x, 0, z });
 
 				float height1 = glm::sin((x / 15.f) * glm::pi<float>()) * 16.f;
@@ -157,37 +177,13 @@ namespace Okay
 				height1 = glm::abs(height1);
 				height2 = glm::abs(height2);
 
-				uint32_t columnHeight = (uint32_t)glm::floor(midHeight + (height1 + height2) * 0.5f);
+				uint32_t columnHeight = (uint32_t)glm::floor(20.f + (height1 + height2) * 0.5f);
 
-				for (uint32_t y = 0; y < WORLD_HEIGHT; y++)
+				for (uint32_t y = 0; y < columnHeight; y++)
 				{
-					chunk.blocks[chunkBlockCoordToChunkBlockIdx({ x, y, z })] = y <= columnHeight;
+					chunk.blocks[chunkBlockCoordToChunkBlockIdx({ x, y, z })] = 1;
 				}
 			}
 		}
-
-		m_newChunks.emplace_back(chunkID);
-	}
-
-	void World::generateChunkIfNotLoaded(ChunkID chunkID)
-	{
-		if (isChunkLoaded(chunkID))
-			return;
-
-		generateChunk(chunkID);
-	}
-
-	void World::unloadChunk(ChunkID chunkID)
-	{
-		m_chunks.erase(chunkID);
-		m_removedChunks.emplace_back(chunkID);
-	}
-
-	void World::unloadChunkIfLoaded(ChunkID chunkID)
-	{
-		if (!isChunkLoaded(chunkID))
-			return;
-
-		unloadChunk(chunkID);
 	}
 }

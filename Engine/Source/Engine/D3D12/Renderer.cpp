@@ -5,6 +5,8 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
 
+#include "Engine/Application/Time.h"
+
 namespace Okay
 {
 	struct RenderData
@@ -14,7 +16,7 @@ namespace Okay
 
 	void Renderer::initialize(const Window& window)
 	{
-#ifdef _DEBUG
+#if 0
 		enableDebugLayer();
 		enableGPUBasedValidation();
 #endif
@@ -36,11 +38,14 @@ namespace Okay
 		createSwapChain(pFactory, window);
 		D3D12_RELEASE(pFactory);
 
-
 		for (FrameResources& frame : m_frames)
 			initializeFrameResources(frame, 100'000'000);
 	
 		createVoxelRenderPass();
+
+		// See if you can reduce the size of these and expand when necessary (use FrameGarbage and replace the DXResource in ResourceArena)
+		m_meshData.initialize(m_pDevice, 500'000'000, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+		m_indicesData.initialize(m_pDevice, 500'000'000, D3D12_RESOURCE_STATE_INDEX_BUFFER);
 
 		FrameResources initFrame;
 		initializeFrameResources(initFrame, 100'000);
@@ -66,12 +71,6 @@ namespace Okay
 		for (FrameGarbage& frameGarbage : m_frameGarbage)
 			D3D12_RELEASE(frameGarbage.pDxUnknown);
 
-		for (DXChunk& dxChunk : m_dxChunks)
-		{
-			D3D12_RELEASE(dxChunk.pMeshResource);
-			D3D12_RELEASE(dxChunk.pIndicesResource);
-		}
-
 		D3D12_RELEASE(m_pDevice);
 		D3D12_RELEASE(m_pCommandQueue);
 		D3D12_RELEASE(m_pSwapChain);
@@ -83,6 +82,9 @@ namespace Okay
 		D3D12_RELEASE(m_pRTVDescHeap);
 		D3D12_RELEASE(m_pDSVDescHeap);
 		D3D12_RELEASE(m_pTextureDescHeap);
+
+		m_meshData.shutdown();
+		m_indicesData.shutdown();
 	}
 
 	void Renderer::render(const World& world)
@@ -147,7 +149,7 @@ namespace Okay
 		for (const DXChunk& dxChunk : m_dxChunks)
 		{
 			frame.pCommandList->IASetIndexBuffer(&dxChunk.indicesView);
-			frame.pCommandList->SetGraphicsRootShaderResourceView(1, dxChunk.pMeshResource->GetGPUVirtualAddress());
+			frame.pCommandList->SetGraphicsRootShaderResourceView(1, dxChunk.meshDataGVA);
 			frame.pCommandList->DrawIndexedInstanced(dxChunk.indicesCount, 1, 0, 0, 0);
 		}
 	}
@@ -155,7 +157,6 @@ namespace Okay
 	void Renderer::postRender()
 	{
 		FrameResources& frame = m_frames[m_pSwapChain->GetCurrentBackBufferIndex()];
-
 		transitionResource(frame.pCommandList, frame.pBackBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
 
 		execute(frame.pCommandList);
@@ -249,7 +250,7 @@ namespace Okay
 	static void addVertex(std::vector<uint32_t>& indices, std::vector<Vertex>& meshData, const Vertex& newVertex)
 	{
 		uint32_t idx = INVALID_UINT32;
-		int startIdx = glm::max((int)meshData.size() - 5, 0);
+		int startIdx = glm::max((int)meshData.size() - 5, 0); // Lmao
 		for (uint64_t i = startIdx; i < meshData.size(); i++)
 		{
 			if (meshData[i] == newVertex)
@@ -389,24 +390,26 @@ namespace Okay
 				if (m_dxChunks[i].chunkID != chunkID)
 					continue;
 
-				addToFrameGarbage(m_dxChunks[i].pMeshResource);
-				addToFrameGarbage(m_dxChunks[i].pIndicesResource);
+				m_meshData.removeAllocation(m_dxChunks[i].meshDataSlot);
+				m_indicesData.removeAllocation(m_dxChunks[i].indicesDataSlot);
 				m_dxChunks.erase(m_dxChunks.begin() + i);
 				break;
 			}
 		}
 
-		for (ChunkID chunkID : world.getNewChunks())
+		ChunkID newlyLoadedChunkID = world.getNewlyLoadedChunk();
+		if (newlyLoadedChunkID != INVALID_CHUNK_ID)
 		{
 			glm::uvec2 textureSheetDims = glm::uvec2((uint32_t)m_pTextureSheet->GetDesc().Width, m_pTextureSheet->GetDesc().Height);
 
 			ChunkGeneration& chunkGen = m_chunkGeneration.emplace_back();
 			chunkGen.pChunkGenData = new ChunkGenerationData;
 			chunkGen.pChunkGenData->threadFinished.store(false);
-			chunkGen.pChunkGenData->chunkID = chunkID;
-			chunkGen.genThread =  std::thread(generateChunkMesh, &world, chunkID, chunkGen.pChunkGenData, textureSheetDims);
+			chunkGen.pChunkGenData->chunkID = newlyLoadedChunkID;
+			chunkGen.genThread = std::thread(generateChunkMesh, &world, newlyLoadedChunkID, chunkGen.pChunkGenData, textureSheetDims);
 		}
 
+		bool meshResourcesTranitioned = false;
 		for (int i = (int)m_chunkGeneration.size() - 1; i >= 0; i--)
 		{
 			if (!m_chunkGeneration[i].pChunkGenData->threadFinished.load())
@@ -415,10 +418,25 @@ namespace Okay
 			m_chunkGeneration[i].genThread.join();
 
 			if (world.isChunkLoaded(m_chunkGeneration[i].pChunkGenData->chunkID))
+			{
+				if (!meshResourcesTranitioned)
+				{
+					meshResourcesTranitioned = true;
+					transitionResource(frame.pCommandList, m_meshData.getDXResource(), D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+					transitionResource(frame.pCommandList, m_indicesData.getDXResource(), D3D12_RESOURCE_STATE_INDEX_BUFFER, D3D12_RESOURCE_STATE_COPY_DEST);
+				}
+
 				writeChunkDataToGPU(m_chunkGeneration[i], frame);
+			}
 
 			delete m_chunkGeneration[i].pChunkGenData;
 			m_chunkGeneration.erase(m_chunkGeneration.begin() + i);
+		}
+
+		if (meshResourcesTranitioned)
+		{
+			transitionResource(frame.pCommandList, m_meshData.getDXResource(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+			transitionResource(frame.pCommandList, m_indicesData.getDXResource(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDEX_BUFFER);
 		}
 	}
 
@@ -433,18 +451,16 @@ namespace Okay
 
 		DXChunk& dxChunk = m_dxChunks.emplace_back();
 		dxChunk.chunkID = chunkID;
-		dxChunk.indicesCount = (uint32_t)indices.size();
-		dxChunk.pMeshResource = createCommittedBuffer(meshDataSize, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_HEAP_TYPE_DEFAULT, L"MeshBuffer" + std::to_wstring(chunkID));
-		dxChunk.pIndicesResource = createCommittedBuffer(indexDataSize, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_HEAP_TYPE_DEFAULT, L"IndicesBuffer" + std::to_wstring(chunkID));
 
-		dxChunk.indicesView.BufferLocation = dxChunk.pIndicesResource->GetGPUVirtualAddress();
+		dxChunk.meshDataGVA = m_meshData.findAndClaimAllocationSlot(meshDataSize, &dxChunk.meshDataSlot);
+
+		dxChunk.indicesCount = (uint32_t)indices.size();
+		dxChunk.indicesView.BufferLocation = m_indicesData.findAndClaimAllocationSlot(indexDataSize, &dxChunk.indicesDataSlot);
 		dxChunk.indicesView.Format = DXGI_FORMAT_R32_UINT;
 		dxChunk.indicesView.SizeInBytes = (uint32_t)indexDataSize;
 
-		updateDefaultHeapResource(dxChunk.pMeshResource, 0, frame, meshData.data(), meshDataSize);
-		updateDefaultHeapResource(dxChunk.pIndicesResource, 0, frame, indices.data(), indexDataSize);
-		transitionResource(frame.pCommandList, dxChunk.pMeshResource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
-		transitionResource(frame.pCommandList, dxChunk.pIndicesResource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDEX_BUFFER);
+		updateDefaultHeapResource(m_meshData.getDXResource(), dxChunk.meshDataSlot.offset, frame, meshData.data(), meshDataSize);
+		updateDefaultHeapResource(m_indicesData.getDXResource(), dxChunk.indicesDataSlot.offset, frame, indices.data(), indexDataSize);
 	}
 
 	D3D12_CPU_DESCRIPTOR_HANDLE Renderer::createRTVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc)
