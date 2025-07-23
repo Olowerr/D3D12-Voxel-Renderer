@@ -16,7 +16,7 @@ namespace Okay
 
 	void Renderer::initialize(const Window& window)
 	{
-#if 0
+#if 1
 		enableDebugLayer();
 		enableGPUBasedValidation();
 #endif
@@ -44,8 +44,8 @@ namespace Okay
 		createVoxelRenderPass();
 
 		// See if you can reduce the size of these and expand when necessary (use FrameGarbage and replace the DXResource in ResourceArena)
-		m_meshData.initialize(m_pDevice, 500'000'000, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
-		m_indicesData.initialize(m_pDevice, 500'000'000, D3D12_RESOURCE_STATE_INDEX_BUFFER);
+		m_gpuMeshData.initialize(m_pDevice, 1'000'000, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+		m_gpuIndicesData.initialize(m_pDevice, 1'000'000, D3D12_RESOURCE_STATE_INDEX_BUFFER);
 
 		FrameResources initFrame;
 		initializeFrameResources(initFrame, 100'000);
@@ -83,8 +83,8 @@ namespace Okay
 		D3D12_RELEASE(m_pDSVDescHeap);
 		D3D12_RELEASE(m_pTextureDescHeap);
 
-		m_meshData.shutdown();
-		m_indicesData.shutdown();
+		m_gpuMeshData.shutdown();
+		m_gpuIndicesData.shutdown();
 	}
 
 	void Renderer::render(const World& world)
@@ -92,10 +92,11 @@ namespace Okay
 		FrameResources& frame = m_frames[m_pSwapChain->GetCurrentBackBufferIndex()];
 		wait(frame.pFence, frame.fenceValue);
 
-		reset(frame.pCommandAllocator, frame.pCommandList);
 		clearFrameGarbage();
+		reset(frame.pCommandAllocator, frame.pCommandList);
 
 		frame.ringBuffer.jumpToStart();
+		printf("frame: %u\n", m_pSwapChain->GetCurrentBackBufferIndex());
 		frame.ringBuffer.map();
 
 		updateBuffers(world);
@@ -390,8 +391,8 @@ namespace Okay
 				if (m_dxChunks[i].chunkID != chunkID)
 					continue;
 
-				m_meshData.removeAllocation(m_dxChunks[i].meshDataSlot);
-				m_indicesData.removeAllocation(m_dxChunks[i].indicesDataSlot);
+				m_gpuMeshData.removeAllocation(m_dxChunks[i].meshDataSlot);
+				m_gpuIndicesData.removeAllocation(m_dxChunks[i].indicesDataSlot);
 				m_dxChunks.erase(m_dxChunks.begin() + i);
 				break;
 			}
@@ -422,8 +423,8 @@ namespace Okay
 				if (!meshResourcesTranitioned)
 				{
 					meshResourcesTranitioned = true;
-					transitionResource(frame.pCommandList, m_meshData.getDXResource(), D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
-					transitionResource(frame.pCommandList, m_indicesData.getDXResource(), D3D12_RESOURCE_STATE_INDEX_BUFFER, D3D12_RESOURCE_STATE_COPY_DEST);
+					transitionResource(frame.pCommandList, m_gpuMeshData.getDXResource(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+					transitionResource(frame.pCommandList, m_gpuIndicesData.getDXResource(), D3D12_RESOURCE_STATE_INDEX_BUFFER, D3D12_RESOURCE_STATE_COPY_DEST);
 				}
 
 				writeChunkDataToGPU(m_chunkGeneration[i], frame);
@@ -435,8 +436,15 @@ namespace Okay
 
 		if (meshResourcesTranitioned)
 		{
-			transitionResource(frame.pCommandList, m_meshData.getDXResource(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
-			transitionResource(frame.pCommandList, m_indicesData.getDXResource(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDEX_BUFFER);
+			transitionResource(frame.pCommandList, m_gpuMeshData.getDXResource(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+			transitionResource(frame.pCommandList, m_gpuIndicesData.getDXResource(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDEX_BUFFER);
+
+			// Need to re-get the GVAs incase the arenas had to resize
+			for (DXChunk& dxChunk : m_dxChunks)
+			{
+				dxChunk.meshDataGVA = m_gpuMeshData.getDXResource()->GetGPUVirtualAddress() + dxChunk.meshDataSlot.offset;
+				dxChunk.indicesView.BufferLocation = m_gpuIndicesData.getDXResource()->GetGPUVirtualAddress() + dxChunk.indicesDataSlot.offset;
+			}
 		}
 	}
 
@@ -451,16 +459,14 @@ namespace Okay
 
 		DXChunk& dxChunk = m_dxChunks.emplace_back();
 		dxChunk.chunkID = chunkID;
-
-		dxChunk.meshDataGVA = m_meshData.findAndClaimAllocationSlot(meshDataSize, &dxChunk.meshDataSlot);
-
+		dxChunk.meshDataGVA = allocateIntoResourceArena(frame, m_gpuMeshData, &dxChunk.meshDataSlot, meshData.data(), meshDataSize);
 		dxChunk.indicesCount = (uint32_t)indices.size();
-		dxChunk.indicesView.BufferLocation = m_indicesData.findAndClaimAllocationSlot(indexDataSize, &dxChunk.indicesDataSlot);
+		dxChunk.indicesView.BufferLocation = allocateIntoResourceArena(frame, m_gpuIndicesData, &dxChunk.indicesDataSlot, indices.data(), indexDataSize);
 		dxChunk.indicesView.Format = DXGI_FORMAT_R32_UINT;
 		dxChunk.indicesView.SizeInBytes = (uint32_t)indexDataSize;
 
-		updateDefaultHeapResource(m_meshData.getDXResource(), dxChunk.meshDataSlot.offset, frame, meshData.data(), meshDataSize);
-		updateDefaultHeapResource(m_indicesData.getDXResource(), dxChunk.indicesDataSlot.offset, frame, indices.data(), indexDataSize);
+		updateDefaultHeapResource(m_gpuMeshData.getDXResource(), dxChunk.meshDataSlot.offset, frame, meshData.data(), meshDataSize);
+		updateDefaultHeapResource(m_gpuIndicesData.getDXResource(), dxChunk.indicesDataSlot.offset, frame, indices.data(), indexDataSize);
 	}
 
 	D3D12_CPU_DESCRIPTOR_HANDLE Renderer::createRTVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc)
@@ -511,6 +517,24 @@ namespace Okay
 		D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = pDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
 		gpuHandle.ptr += slotIdx * (uint64_t)m_cbvSrvUavIncrementSize;
 		return gpuHandle;
+	}
+
+	D3D12_GPU_VIRTUAL_ADDRESS Renderer::allocateIntoResourceArena(FrameResources& frame, ResourceArena& arena, ResourceSlot* pOutSlot, const void* pData, uint64_t dataSize)
+	{
+		uint32_t allocatinonHandle = INVALID_UINT32;
+		if (arena.findAllocationSlot(dataSize, &allocatinonHandle))
+			return arena.claimAllocationSlot(dataSize, allocatinonHandle, pOutSlot);
+
+		ID3D12Resource* pOldArenaResource = arena.getDXResource();
+		uint64_t oldSize = pOldArenaResource->GetDesc().Width;
+		arena.resize(frame.pCommandList, uint64_t((oldSize + dataSize) * 1.25f), D3D12_RESOURCE_STATE_COPY_DEST);
+
+		addToFrameGarbage(pOldArenaResource);
+
+		printf("resizing, %.4f\n", (uint32_t)arena.getDXResource()->GetDesc().Width / 1'000'000.f);
+
+		arena.findAllocationSlot(dataSize, &allocatinonHandle);
+		return arena.claimAllocationSlot(dataSize, allocatinonHandle, pOutSlot);
 	}
 
 	void Renderer::enableDebugLayer()

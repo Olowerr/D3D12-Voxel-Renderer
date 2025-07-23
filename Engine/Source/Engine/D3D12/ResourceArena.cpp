@@ -4,7 +4,9 @@ namespace Okay
 {
 	void ResourceArena::initialize(ID3D12Device* pDevice, uint64_t resourceSize, D3D12_RESOURCE_STATES initialState)
 	{
-		createResource(pDevice, resourceSize, initialState);
+		m_pDevice = pDevice;
+		m_pDXResource = createResource(resourceSize, initialState);
+		m_slots.emplace_back(0, m_pDXResource->GetDesc().Width);
 	}
 
 	void ResourceArena::shutdown()
@@ -14,25 +16,62 @@ namespace Okay
 		m_slots.shrink_to_fit();
 	}
 
-	D3D12_GPU_VIRTUAL_ADDRESS ResourceArena::findAndClaimAllocationSlot(uint64_t allocationSize, ResourceSlot* pOutSlot)
+	void ResourceArena::resize(ID3D12GraphicsCommandList* pCommandList, uint64_t newSize, D3D12_RESOURCE_STATES currentState)
 	{
-		uint32_t slotIdx = findAllocationSlot(allocationSize);
-		D3D12_GPU_VIRTUAL_ADDRESS allocationGVA = m_pDXResource->GetGPUVirtualAddress() + m_slots[slotIdx].offset;
+		uint64_t oldSize = m_pDXResource->GetDesc().Width;
+
+		ID3D12Resource* newResource = createResource(newSize, D3D12_RESOURCE_STATE_COPY_DEST);
+
+		D3D12_RESOURCE_BARRIER barriers[2] = {};
+		barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+		barriers[0].Transition.pResource = m_pDXResource;
+		barriers[0].Transition.StateBefore = currentState;
+		barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+		barriers[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+		barriers[0].Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+		pCommandList->ResourceBarrier(1, barriers);
+		
+		pCommandList->CopyBufferRegion(newResource, 0, m_pDXResource, 0, oldSize);
+
+		uint32_t numBarriers = 1;
+		barriers[0].Transition.pResource = m_pDXResource;
+		barriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_SOURCE;
+		barriers[0].Transition.StateAfter = currentState;
+		if (currentState != D3D12_RESOURCE_STATE_COPY_DEST)
+		{
+			barriers[1].Transition.pResource = newResource;
+			barriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+			barriers[1].Transition.StateAfter = currentState;
+			numBarriers++;
+		}
+		pCommandList->ResourceBarrier(numBarriers, barriers);
+
+
+		m_pDXResource = newResource;
+
+		// Handles potential slot merging
+		removeAllocation(ResourceSlot(oldSize, newSize - oldSize));
+	}
+
+	D3D12_GPU_VIRTUAL_ADDRESS ResourceArena::claimAllocationSlot(uint64_t allocationSize, uint32_t allocationHandle, ResourceSlot* pOutSlot)
+	{
+		OKAY_ASSERT(allocationHandle < m_slots.size());
+		D3D12_GPU_VIRTUAL_ADDRESS allocationGVA = m_pDXResource->GetGPUVirtualAddress() + m_slots[allocationHandle].offset;
 
 		if (pOutSlot)
 		{
-			pOutSlot->offset = m_slots[slotIdx].offset;
+			pOutSlot->offset = m_slots[allocationHandle].offset;
 			pOutSlot->size = allocationSize;
 		}
 
-		if (allocationSize == m_slots[slotIdx].size)
+		if (allocationSize == m_slots[allocationHandle].size)
 		{
-			m_slots.erase(m_slots.begin() + slotIdx);
+			m_slots.erase(m_slots.begin() + allocationHandle);
 		}
 		else
 		{
-			m_slots[slotIdx].offset += allocationSize;
-			m_slots[slotIdx].size -= allocationSize;
+			m_slots[allocationHandle].offset += allocationSize;
+			m_slots[allocationHandle].size -= allocationSize;
 		}
 
 		return allocationGVA;
@@ -96,9 +135,9 @@ namespace Okay
 		return m_pDXResource;
 	}
 
-	uint32_t ResourceArena::findAllocationSlot(uint64_t allocationSize)
+	bool ResourceArena::findAllocationSlot(uint64_t allocationSize, uint32_t* pOutAllocationHandle)
 	{
-		uint64_t bestSlotFitIdx = INVALID_UINT64;
+		*pOutAllocationHandle = INVALID_UINT32;
 		uint64_t smallestSlotSize = UINT64_MAX;
 
 		// Find tightest fit
@@ -107,18 +146,17 @@ namespace Okay
 			ResourceSlot& slot = m_slots[i];
 			if (allocationSize <= slot.size && slot.size < smallestSlotSize)
 			{
-				bestSlotFitIdx = i;
+				*pOutAllocationHandle = (uint32_t)i;
 				smallestSlotSize = slot.size;
 
 				// Can technically stop searching if slot.size == alocationSize but I feel like that would be a rare occurence :3
 			}
 		}
 
-		OKAY_ASSERT(bestSlotFitIdx != INVALID_UINT64);
-		return (uint32_t)bestSlotFitIdx;
+		return *pOutAllocationHandle != INVALID_UINT32;
 	}
 
-	void ResourceArena::createResource(ID3D12Device* pDevice, uint64_t resourceSize, D3D12_RESOURCE_STATES initialState)
+	ID3D12Resource* ResourceArena::createResource(uint64_t resourceSize, D3D12_RESOURCE_STATES initialState)
 	{
 		D3D12_RESOURCE_DESC desc = {};
 		desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
@@ -140,9 +178,10 @@ namespace Okay
 		heapProperties.CreationNodeMask = 0;
 		heapProperties.VisibleNodeMask = 0;
 
-		DX_CHECK(pDevice->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &desc, initialState, nullptr, IID_PPV_ARGS(&m_pDXResource)));
-		m_pDXResource->SetName(L"ResourceArena");
+		ID3D12Resource* pResource = nullptr;
+		DX_CHECK(m_pDevice->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &desc, initialState, nullptr, IID_PPV_ARGS(&pResource)));
+		pResource->SetName(L"ResourceArena");
 
-		m_slots.emplace_back(0, resourceSize);
+		return pResource;
 	}
 }

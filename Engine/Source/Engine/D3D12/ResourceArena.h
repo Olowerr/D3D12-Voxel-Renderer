@@ -23,16 +23,20 @@ namespace Okay
 		void initialize(ID3D12Device* pDevice, uint64_t resourceSize, D3D12_RESOURCE_STATES initialState);
 		void shutdown();
 
-		D3D12_GPU_VIRTUAL_ADDRESS findAndClaimAllocationSlot(uint64_t allocationSize, ResourceSlot* pOutSlot);
+		// Assumes the release of the dxResource is handled by the caller after the function call
+		void resize(ID3D12GraphicsCommandList* pCommandList, uint64_t newSize, D3D12_RESOURCE_STATES currentState);
+
+		bool findAllocationSlot(uint64_t allocationSize, uint32_t* pOutAllocationHandle);
+		D3D12_GPU_VIRTUAL_ADDRESS claimAllocationSlot(uint64_t allocationSize, uint32_t allocationHandle, ResourceSlot* pOutSlot);
 		void removeAllocation(const ResourceSlot& removedSlot);
 
 		ID3D12Resource* getDXResource() const;
 
 	private:
-		uint32_t findAllocationSlot(uint64_t allocationSize);
-		void createResource(ID3D12Device* pDevice, uint64_t resourceSize, D3D12_RESOURCE_STATES initialState);
+		ID3D12Resource* createResource(uint64_t resourceSize, D3D12_RESOURCE_STATES initialState);
 
 	private:
+		ID3D12Device* m_pDevice = nullptr;
 		ID3D12Resource* m_pDXResource = nullptr;
 		std::vector<ResourceSlot> m_slots;
 

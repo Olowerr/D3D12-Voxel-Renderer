@@ -134,6 +134,8 @@ namespace Okay
 		D3D12_GPU_DESCRIPTOR_HANDLE createSRVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_SHADER_RESOURCE_VIEW_DESC* pDesc);
 		D3D12_GPU_DESCRIPTOR_HANDLE createUAVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_UNORDERED_ACCESS_VIEW_DESC* pDesc);
 
+		D3D12_GPU_VIRTUAL_ADDRESS allocateIntoResourceArena(FrameResources& frame, ResourceArena& arena, ResourceSlot* pOutSlot, const void* pData, uint64_t dataSize);
+
 	private: // Creation
 		void enableDebugLayer();
 		void enableGPUBasedValidation();
@@ -177,8 +179,8 @@ namespace Okay
 		std::vector<DXChunk> m_dxChunks;
 		std::vector<ChunkGeneration> m_chunkGeneration;
 
-		ResourceArena m_meshData;
-		ResourceArena m_indicesData;
+		ResourceArena m_gpuMeshData;
+		ResourceArena m_gpuIndicesData;
 
 		ID3D12Resource* m_pTextureSheet = nullptr;
 		D3D12_GPU_DESCRIPTOR_HANDLE m_textureHandle = {};
