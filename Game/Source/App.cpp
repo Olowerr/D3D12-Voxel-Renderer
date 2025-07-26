@@ -49,7 +49,9 @@ void App::updateCamera(TimeStep dt)
 		return;
 	}
 
-	Transform& camTransform = m_world.getCamera().transform;
+	Camera& camera = m_world.getCamera();
+	Transform& camTransform = camera.transform;
+
 	float camMoveSpeed = Input::isKeyDown(Key::L_SHIFT) ? 50.f : 16.f;
 	float camRotSpeed = 0.1f;
 
@@ -83,4 +85,8 @@ void App::updateCamera(TimeStep dt)
 	glm::vec2 mouseDelta = Input::getMouseDelta();
 	camTransform.rotation.y += mouseDelta.x * camRotSpeed;
 	camTransform.rotation.x += mouseDelta.y * camRotSpeed;
+
+
+	// Zoom
+	camera.fov = glm::clamp(camera.fov - Input::getScrollDelta(), 5.f, 90.f);
 }

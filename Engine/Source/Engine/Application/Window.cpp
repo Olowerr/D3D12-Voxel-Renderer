@@ -17,6 +17,7 @@ namespace Okay
 
 		Input::s_pWindow = this;
 
+		// Place window in the center of the screen
 		if (GLFWmonitor* pMonitor = glfwGetPrimaryMonitor())
 		{
 			int monitorWidth = -1, monitorHeight = -1;
@@ -57,6 +58,11 @@ namespace Okay
 		glfwSetCursorPosCallback(m_pGlfwWindow, [](GLFWwindow* pWindow, double xPos, double yPos)
 		{
 			Input::setMousePosition(glm::vec2(xPos, yPos));
+		});
+
+		glfwSetScrollCallback(m_pGlfwWindow, [](GLFWwindow* pWindow, double xOffset, double yOffset)
+		{
+			Input::setScrollDelta((float)yOffset);
 		});
 
 		glfwShowWindow(m_pGlfwWindow);

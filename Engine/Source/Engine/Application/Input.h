@@ -26,6 +26,7 @@ namespace Okay
 		static MouseMode getMouseMode();
 
 		static glm::vec2 getMouseDelta();
+		static float getScrollDelta();
 
 	private:
 		static void preInputHandling();
@@ -37,6 +38,7 @@ namespace Okay
 		static void setMouseButtonUp(MouseButton buttonCode);
 
 		static void setMousePosition(glm::vec2 position);
+		static void setScrollDelta(float delta);
 
 	private:
 		static Window* s_pWindow;
@@ -49,6 +51,8 @@ namespace Okay
 
 		static glm::vec2 s_mousePosLastFrame;
 		static glm::vec2 s_mousePosCurrentFrame;
+
+		static float s_scrollDelta;
 
 	};
 }
