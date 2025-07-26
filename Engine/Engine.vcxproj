@@ -30,6 +30,7 @@
     <ClInclude Include="Source\Engine\D3D12\RingBuffer.h" />
     <ClInclude Include="Source\Engine\Okay.h" />
     <ClInclude Include="Source\Engine\World\Camera.h" />
+    <ClInclude Include="Source\Engine\World\Chunk.h" />
     <ClInclude Include="Source\Engine\World\Transform.h" />
     <ClInclude Include="Source\Engine\World\World.h" />
   </ItemGroup>

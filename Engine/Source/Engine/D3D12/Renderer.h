@@ -1,6 +1,7 @@
 #pragma once
 #include "RingBuffer.h"
 #include "ResourceArena.h"
+#include "Engine/World/Chunk.h"
 
 #include <thread>
 #include <atomic>
@@ -35,12 +36,23 @@ namespace Okay
 	{
 		ChunkID chunkID = INVALID_CHUNK_ID;
 		
-		D3D12_GPU_VIRTUAL_ADDRESS meshDataGVA = {};
+		D3D12_GPU_VIRTUAL_ADDRESS vertexDataGVA = {};
 		D3D12_INDEX_BUFFER_VIEW indicesView = {};
 		uint32_t indicesCount = INVALID_UINT32;
 
-		ResourceSlot meshDataSlot;
+		ResourceSlot vertexDataSlot;
 		ResourceSlot indicesDataSlot;
+	};
+
+	struct FrameGarbage
+	{
+		FrameGarbage(uint32_t frameIdx, IUnknown* pDxUnknown)
+			:frameIdx(frameIdx), pDxUnknown(pDxUnknown)
+		{
+		}
+
+		uint32_t frameIdx = INVALID_UINT32;
+		IUnknown* pDxUnknown = nullptr; // Base class containing Release()
 	};
 
 	struct Vertex
@@ -69,29 +81,15 @@ namespace Okay
 		glm::vec2 uv = glm::vec2(0.f);
 	};
 
-	struct ChunkGenerationData
-	{
-		ChunkID chunkID = INVALID_CHUNK_ID;
-		std::atomic<bool> threadFinished;
-		std::vector<uint32_t> indices;
-		std::vector<Vertex> meshData;
-	};
-
-	struct ChunkGeneration
+	struct ChunkMesh
 	{
 		std::thread genThread;
-		ChunkGenerationData* pChunkGenData = nullptr;
-	};
+		std::atomic<bool> threadFinished;
+		std::atomic<bool> restart;
 
-	struct FrameGarbage
-	{
-		FrameGarbage(uint32_t frameIdx, IUnknown* pDxUnknown)
-			:frameIdx(frameIdx), pDxUnknown(pDxUnknown)
-		{
-		}
-
-		uint32_t frameIdx = INVALID_UINT32;
-		IUnknown* pDxUnknown = nullptr; // Base class containing Release()
+		ChunkID chunkID = INVALID_CHUNK_ID;
+		std::vector<Vertex> vertices;
+		std::vector<uint32_t> indices;
 	};
 
 	class Renderer
@@ -127,7 +125,8 @@ namespace Okay
 		void updateDefaultHeapResource(ID3D12Resource* pTarget, uint64_t targetOffset, FrameResources& frame, const void* pData, uint64_t dataSize);
 
 		void updateChunks(FrameResources& frame, const World& world);
-		void writeChunkDataToGPU(const ChunkGeneration& chunkGeneration, FrameResources& frame);
+		void writeChunkDataToGPU(ChunkID chunkID, const ChunkMesh& chunkMesh, FrameResources& frame);
+		void findAndDeleteDXChunk(ChunkID chunkID);
 
 		D3D12_CPU_DESCRIPTOR_HANDLE createRTVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc);
 		D3D12_CPU_DESCRIPTOR_HANDLE createDSVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_DEPTH_STENCIL_VIEW_DESC* pDesc);
@@ -177,9 +176,9 @@ namespace Okay
 		D3D12_GPU_VIRTUAL_ADDRESS m_renderDataGVA = INVALID_UINT64;
 
 		std::vector<DXChunk> m_dxChunks;
-		std::vector<ChunkGeneration> m_chunkGeneration;
+		std::unordered_map<ChunkID, ChunkMesh> m_loadingChunkMesh;
 
-		ResourceArena m_gpuMeshData;
+		ResourceArena m_gpuVertexData;
 		ResourceArena m_gpuIndicesData;
 
 		ID3D12Resource* m_pTextureSheet = nullptr;
