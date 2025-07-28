@@ -35,7 +35,7 @@ namespace Okay
 	struct DXChunk
 	{
 		ChunkID chunkID = INVALID_CHUNK_ID;
-		
+
 		D3D12_GPU_VIRTUAL_ADDRESS vertexDataGVA = {};
 		D3D12_INDEX_BUFFER_VIEW indicesView = {};
 		uint32_t indicesCount = INVALID_UINT32;
@@ -81,16 +81,23 @@ namespace Okay
 		glm::vec2 uv = glm::vec2(0.f);
 	};
 
-	struct ChunkMesh
+	struct ChunkMeshData
 	{
-		std::thread genThread;
-		std::atomic<bool> threadFinished;
-		std::atomic<bool> restart;
-
-		ChunkID chunkID = INVALID_CHUNK_ID;
 		std::vector<Vertex> vertices;
 		std::vector<uint32_t> indices;
 	};
+
+	struct ThreadSafeChunkMesh
+	{
+		std::atomic<bool> meshGenerated;
+		std::atomic<uint32_t> latestChunkGenID;
+		// Might be neccessay to add a 'finishedID' int here to confirm that lastID == finishedID
+		// incase threadFinished is set to true right before lastID is incremented & threadFinished set to false.
+		// But Seems oki for now :3
+
+		ChunkMeshData meshData;
+	};
+
 
 	class Renderer
 	{
@@ -125,7 +132,7 @@ namespace Okay
 		void updateDefaultHeapResource(ID3D12Resource* pTarget, uint64_t targetOffset, FrameResources& frame, const void* pData, uint64_t dataSize);
 
 		void updateChunks(FrameResources& frame, const World& world);
-		void writeChunkDataToGPU(ChunkID chunkID, const ChunkMesh& chunkMesh, FrameResources& frame);
+		void writeChunkDataToGPU(ChunkID chunkID, const ChunkMeshData& chunkMesh, FrameResources& frame);
 		void findAndDeleteDXChunk(ChunkID chunkID);
 
 		D3D12_CPU_DESCRIPTOR_HANDLE createRTVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc);
@@ -176,7 +183,7 @@ namespace Okay
 		D3D12_GPU_VIRTUAL_ADDRESS m_renderDataGVA = INVALID_UINT64;
 
 		std::vector<DXChunk> m_dxChunks;
-		std::unordered_map<ChunkID, ChunkMesh> m_loadingChunkMesh;
+		std::unordered_map<ChunkID, ThreadSafeChunkMesh> m_loadingChunkMesh;
 
 		ResourceArena m_gpuVertexData;
 		ResourceArena m_gpuIndicesData;

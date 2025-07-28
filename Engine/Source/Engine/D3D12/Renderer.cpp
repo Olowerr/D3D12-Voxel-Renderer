@@ -1,11 +1,10 @@
 #include "Renderer.h"
 #include "Engine/Application/Window.h"
 #include "Engine/World/World.h"
+#include "Engine/Utilities/ThreadPool.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
-
-#include "Engine/Application/Time.h"
 
 namespace Okay
 {
@@ -16,7 +15,7 @@ namespace Okay
 
 	void Renderer::initialize(const Window& window)
 	{
-#if 1
+#if 0
 		enableDebugLayer();
 		enableGPUBasedValidation();
 #endif
@@ -58,15 +57,10 @@ namespace Okay
 		shutdowFrameResources(initFrame);
 
 		generateTextureSheetMipMaps(m_pTextureSheet, TEXTURE_SHEET_TILE_SIZE);
-
-		m_loadingChunkMesh.reserve(std::thread::hardware_concurrency() / 2);
 	}
 
 	void Renderer::shutdown()
 	{
-		for (auto& chunkIterator : m_loadingChunkMesh)
-			chunkIterator.second.genThread.join();
-
 		for (FrameResources& frame : m_frames)
 			shutdowFrameResources(frame);
 
@@ -274,34 +268,28 @@ namespace Okay
 		}
 	}
 
-	static void generateChunkMesh(const World* pWorld, ChunkID chunkID, ChunkMesh* pChunkMesh, glm::uvec2 textureSheetDims)
+	static void generateChunkMesh(const World* pWorld, ChunkID chunkID, ThreadSafeChunkMesh* pChunkMesh, uint32_t chunkGenID, glm::uvec2 textureSheetDims, ChunkMeshData& outMeshData)
 	{
 		glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkID);
 		glm::ivec3 worldCoord = chunkCoordToWorldCoord(chunkCoord);
 
-		std::vector<uint32_t>& indices = pChunkMesh->indices;
-		std::vector<Vertex>& vertices = pChunkMesh->vertices;
+		std::vector<uint32_t>& indices = outMeshData.indices;
+		std::vector<Vertex>& vertices = outMeshData.vertices;
 
 		vertices.reserve(MAX_BLOCKS_IN_CHUNK * 36ull);
 		indices.reserve(MAX_BLOCKS_IN_CHUNK * 36ull);
 
 		for (uint32_t i = 0; i < MAX_BLOCKS_IN_CHUNK; i++)
 		{
+			if (pChunkMesh->latestChunkGenID != chunkGenID)
+				return;
+
 			uint8_t block = pWorld->tryGetBlock(chunkID, i);
 			if (block == INVALID_UINT8) // Chunk is no longer loaded
-				break;
+				return;
 
 			if (block == 0)
-			{
-				if (pChunkMesh->restart.load())
-				{
-					vertices.clear();
-					indices.clear();
-					i = UINT32_MAX; // a bit sus but wraps back to 0 once i++ runs lmao
-					pChunkMesh->restart.store(false);
-				}
 				continue;
-			}
 
 			glm::ivec3 chunkBlockCoord = chunkBlockIdxToChunkBlockCoord(i);
 			glm::ivec3 worldBlockCoord = chunkBlockCoord + worldCoord;
@@ -388,17 +376,7 @@ namespace Okay
 				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(1, 1), sideTextureIdx, textureSheetDims));
 				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), sideTextureIdx, textureSheetDims));
 			}
-
-			if (pChunkMesh->restart.load())
-			{
-				vertices.clear();
-				indices.clear();
-				i = UINT32_MAX; // a bit sus but wraps back to 0 once i++ runs lmao
-				pChunkMesh->restart.store(false);
-			}
 		}
-
-		pChunkMesh->threadFinished.store(true);
 	}
 
 	void Renderer::updateChunks(FrameResources& frame, const World& world)
@@ -407,9 +385,6 @@ namespace Okay
 		{
 			findAndDeleteDXChunk(chunkID);
 		}
-
-		//if ((uint32_t)world.getAddedChunks().size())
-		//	printf("%u\n", (uint32_t)world.getAddedChunks().size());
 
 		for (ChunkID chunkID : world.getAddedChunks())
 		{
@@ -425,28 +400,42 @@ namespace Okay
 			glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkID);
 			for (const glm::ivec2& offset : offsets)
 			{
-				if (m_loadingChunkMesh.size() == m_loadingChunkMesh.max_size())
-					break;
-
 				ChunkID adjacentChunkID = chunkCoordToChunkID(chunkCoord + offset);
 				if (!world.isChunkLoaded(adjacentChunkID))
 					continue;
 
-				auto adjacentChunkIterator = m_loadingChunkMesh.find(adjacentChunkID);
-				if (adjacentChunkIterator != m_loadingChunkMesh.end())
-				{
-					// Need to restart the mesh generation of a in-progress chunk to ensure the mesh is correct
-					// even if an adjacent chunk is loaded while the mesh is being generated
-					adjacentChunkIterator->second.restart.store(true);
-					continue;
-				}
-
 				glm::uvec2 textureSheetDims = glm::uvec2((uint32_t)m_pTextureSheet->GetDesc().Width, m_pTextureSheet->GetDesc().Height);
 
-				ChunkMesh& chunkMesh = m_loadingChunkMesh[adjacentChunkID];
-				chunkMesh.threadFinished.store(false);
-				chunkMesh.restart.store(false);
-				chunkMesh.genThread = std::thread(generateChunkMesh, &world, adjacentChunkID, &chunkMesh, textureSheetDims);
+				uint32_t chunkGenID = INVALID_UINT32;
+				auto adjacentChunkIterator = m_loadingChunkMesh.find(adjacentChunkID);
+				ThreadSafeChunkMesh* pThreadChunk = nullptr;
+
+				if (adjacentChunkIterator != m_loadingChunkMesh.end())
+				{
+					pThreadChunk = &adjacentChunkIterator->second;
+					chunkGenID = ++pThreadChunk->latestChunkGenID;
+				}
+				else
+				{
+					pThreadChunk = &m_loadingChunkMesh[adjacentChunkID];
+					pThreadChunk->latestChunkGenID = 0;
+					chunkGenID = 0;
+				}
+
+				pThreadChunk->meshGenerated.store(false);
+
+				const World* pWorld = &world;
+				ThreadPool::queueJob([=]()
+				{
+					ChunkMeshData outMeshData;
+					generateChunkMesh(pWorld, adjacentChunkID, pThreadChunk, chunkGenID, textureSheetDims, outMeshData);
+					
+					if (pThreadChunk->latestChunkGenID == chunkGenID)
+					{
+						pThreadChunk->meshData = std::move(outMeshData);
+						pThreadChunk->meshGenerated.store(true);
+					}
+				});
 			}
 		}
 
@@ -454,14 +443,12 @@ namespace Okay
 		auto chunkIterator = m_loadingChunkMesh.begin();
 		while (chunkIterator != m_loadingChunkMesh.end())
 		{
-			ChunkMesh& chunkMesh = chunkIterator->second;
-			if (!chunkMesh.threadFinished.load())
+			ThreadSafeChunkMesh& threadChunk = chunkIterator->second;
+			if (!threadChunk.meshGenerated.load())
 			{
 				++chunkIterator;
 				continue;
 			}
-
-			chunkMesh.genThread.join();
 
 			ChunkID chunkID = chunkIterator->first;
 			if (!world.isChunkLoaded(chunkID))
@@ -478,7 +465,7 @@ namespace Okay
 			}
 
 			findAndDeleteDXChunk(chunkID);
-			writeChunkDataToGPU(chunkID, chunkMesh, frame);
+			writeChunkDataToGPU(chunkID, threadChunk.meshData, frame);
 			
 			chunkIterator = m_loadingChunkMesh.erase(chunkIterator);
 		}
@@ -497,7 +484,7 @@ namespace Okay
 		}
 	}
 
-	void Renderer::writeChunkDataToGPU(ChunkID chunkID, const ChunkMesh& chunkMesh, FrameResources& frame)
+	void Renderer::writeChunkDataToGPU(ChunkID chunkID, const ChunkMeshData& chunkMesh, FrameResources& frame)
 	{
 		uint64_t vertexDataSize = chunkMesh.vertices.size() * sizeof(Vertex);
 		uint64_t indexDataSize = chunkMesh.indices.size() * sizeof(uint32_t);

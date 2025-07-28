@@ -1,19 +1,18 @@
 #include "World.h"
 #include "../Application/Time.h"
 #include "../Application/Input.h"
+#include "Engine/Utilities/ThreadPool.h"
 
 #include <shared_mutex>
 #include <chrono>
 
 namespace Okay
 {
-	static const int RENDER_DISTNACE = 8;
-	static const int MAX_CHUNKS_PROCCESSED_PER_FRAME = 1;
+	static const uint32_t RENDER_DISTNACE = 16;
 	static std::shared_mutex mutis;
 
 	World::World()
 	{
-		m_loadingChunks.reserve(std::thread::hardware_concurrency() / 2);
 	}
 
 	World::~World()
@@ -54,8 +53,6 @@ namespace Okay
 				continue;
 			}
 
-			chunkGeneration.genThread.join();
-
 			ChunkID chunkID = loadingChunkIterator->first;
 			if (!isChunkWithinRenderDistance(chunkIDToChunkCoord(chunkID)))
 			{
@@ -69,10 +66,10 @@ namespace Okay
 			loadingChunkIterator = m_loadingChunks.erase(loadingChunkIterator);
 		}
 
-		uint32_t chunksLaunched = 0;
-		for (int chunkX = -RENDER_DISTNACE; chunkX <= RENDER_DISTNACE; chunkX++)
+
+		for (int chunkX = -(int)RENDER_DISTNACE; chunkX <= (int)RENDER_DISTNACE; chunkX++)
 		{
-			for (int chunkZ = -RENDER_DISTNACE; chunkZ <= RENDER_DISTNACE; chunkZ++)
+			for (int chunkZ = -(int)RENDER_DISTNACE; chunkZ <= (int)RENDER_DISTNACE; chunkZ++)
 			{
 				glm::ivec2 chunkCoord = m_currentCamChunkCoord + glm::ivec2(chunkX, chunkZ);
 				ChunkID chunkID = chunkCoordToChunkID(chunkCoord);
@@ -80,14 +77,7 @@ namespace Okay
 				if (isChunkLoaded(chunkID) || isChunkLoading(chunkID) || !isChunkWithinRenderDistance(chunkCoord))
 					continue;
 
-				if (m_loadingChunks.size() == m_loadingChunks.max_size())
-					continue;
-
-
 				launchChunkGenerationThread(chunkID);
-
-				if (++chunksLaunched == MAX_CHUNKS_PROCCESSED_PER_FRAME)
-					return;
 			}
 		}
 	}
@@ -181,8 +171,8 @@ namespace Okay
 			{
 				//glm::ivec3 blockCoord = chunkBlockCoordToBlockCoord(chunkID, { x, 0, z });
 
-				float height1 = glm::cos((x / 15.f) * glm::pi<float>()) * 16.f;
-				float height2 = glm::cos((z / 15.f) * glm::pi<float>()) * 16.f;
+				float height1 = glm::sin((x / 30.f) * glm::pi<float>()) * 16.f;
+				float height2 = glm::sin((z / 30.f) * glm::pi<float>()) * 16.f;
 
 				height1 = glm::abs(height1);
 				height2 = glm::abs(height2);
@@ -205,10 +195,13 @@ namespace Okay
 
 	void World::launchChunkGenerationThread(ChunkID chunkID)
 	{
-		ChunkGeneration& chunkGeneration = m_loadingChunks[chunkID];
-		chunkGeneration.chunkID = chunkID;
-		chunkGeneration.threadFinished.store(false);
+		ChunkGeneration* pChunkGeneration = &m_loadingChunks[chunkID];
+		pChunkGeneration->chunkID = chunkID;
+		pChunkGeneration->threadFinished.store(false);
 
-		chunkGeneration.genThread = std::thread(startChunkGeneration, &chunkGeneration);
+		ThreadPool::queueJob([=]()
+		{
+			startChunkGeneration(pChunkGeneration);
+		});
 	}
 }

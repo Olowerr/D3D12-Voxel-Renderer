@@ -29,6 +29,7 @@
     <ClInclude Include="Source\Engine\D3D12\ResourceArena.h" />
     <ClInclude Include="Source\Engine\D3D12\RingBuffer.h" />
     <ClInclude Include="Source\Engine\Okay.h" />
+    <ClInclude Include="Source\Engine\Utilities\ThreadPool.h" />
     <ClInclude Include="Source\Engine\World\Camera.h" />
     <ClInclude Include="Source\Engine\World\Chunk.h" />
     <ClInclude Include="Source\Engine\World\Transform.h" />
@@ -41,6 +42,7 @@
     <ClCompile Include="Source\Engine\D3D12\Renderer.cpp" />
     <ClCompile Include="Source\Engine\D3D12\ResourceArena.cpp" />
     <ClCompile Include="Source\Engine\D3D12\RingBuffer.cpp" />
+    <ClCompile Include="Source\Engine\Utilities\ThreadPool.cpp" />
     <ClCompile Include="Source\Engine\World\World.cpp" />
   </ItemGroup>
   <ItemGroup>

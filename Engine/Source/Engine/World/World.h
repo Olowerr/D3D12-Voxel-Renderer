@@ -12,9 +12,7 @@ namespace Okay
 	public:
 		struct ChunkGeneration
 		{
-			std::thread genThread;
 			std::atomic<bool> threadFinished;
-
 			ChunkID chunkID = INVALID_CHUNK_ID;
 			Chunk chunk;
 		};

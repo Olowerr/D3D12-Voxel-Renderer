@@ -1,4 +1,5 @@
 #include "Application.h"
+#include "Engine/Utilities/ThreadPool.h"
 
 namespace Okay
 {
@@ -8,6 +9,8 @@ namespace Okay
 		bool glInit = glfwInit();
 		OKAY_ASSERT(glInit);
 
+		ThreadPool::initialize(std::thread::hardware_concurrency() / 2);
+
 		m_window.initiate(windowTitle, windowWidth, windowHeight);
 		m_renderer.initialize(m_window);
 	}
@@ -16,6 +19,7 @@ namespace Okay
 	{
 		m_window.shutdown();
 		m_renderer.shutdown();
+		ThreadPool::shutdown();
 	}
 
 	void Application::run()
