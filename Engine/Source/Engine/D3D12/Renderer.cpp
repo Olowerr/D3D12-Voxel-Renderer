@@ -11,6 +11,14 @@ namespace Okay
 	struct GPURenderData
 	{
 		glm::mat4 viewProjMatrix = glm::mat4(1.f);
+		uint32_t textureSheetTileSize = 0;
+		uint32_t textureSheetPadding = 0;
+		glm::vec2 padding0 = glm::vec2(0.f);
+	};
+	
+	struct GPUDrawCallData
+	{
+		glm::vec3 chunkWorldPos = glm::vec3(0.f);
 	};
 
 	void Renderer::initialize(const Window& window)
@@ -109,6 +117,8 @@ namespace Okay
 
 		GPURenderData renderData = {};
 		renderData.viewProjMatrix = glm::transpose(camera.getProjectionMatrix(m_viewport.Width, m_viewport.Height) * camera.transform.getViewMatrix());
+		renderData.textureSheetTileSize = TEXTURE_SHEET_TILE_SIZE;
+		renderData.textureSheetPadding = TEXTURE_SHEET_PADDING;
 
 		FrameResources& frame = getCurrentFrameResorces();
 		m_renderDataGVA = frame.ringBuffer.allocate(&renderData, sizeof(renderData));
@@ -134,9 +144,9 @@ namespace Okay
 		frame.pCommandList->SetPipelineState(m_pVoxelPSO);
 
 		frame.pCommandList->SetDescriptorHeaps(1, &m_pTextureDescHeap);
+		frame.pCommandList->SetGraphicsRootDescriptorTable(3, m_textureHandle);
 
 		frame.pCommandList->SetGraphicsRootConstantBufferView(0, m_renderDataGVA);
-		frame.pCommandList->SetGraphicsRootDescriptorTable(2, m_textureHandle);
 
 		frame.pCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		frame.pCommandList->RSSetViewports(1, &m_viewport);
@@ -146,7 +156,13 @@ namespace Okay
 		for (const DXChunk& dxChunk : m_dxChunks)
 		{
 			frame.pCommandList->IASetIndexBuffer(&dxChunk.indicesView);
-			frame.pCommandList->SetGraphicsRootShaderResourceView(1, dxChunk.vertexDataGVA);
+			frame.pCommandList->SetGraphicsRootShaderResourceView(2, dxChunk.vertexDataGVA);
+
+			GPUDrawCallData drawData = {};
+			drawData.chunkWorldPos = chunkCoordToWorldCoord(chunkIDToChunkCoord(dxChunk.chunkID));
+			D3D12_GPU_VIRTUAL_ADDRESS drawDataGVA = frame.ringBuffer.allocate(&drawData, sizeof(drawData));
+			frame.pCommandList->SetGraphicsRootConstantBufferView(1, drawDataGVA);
+
 			frame.pCommandList->DrawIndexedInstanced(dxChunk.indicesCount, 1, 0, 0, 0);
 		}
 	}
@@ -239,7 +255,7 @@ namespace Okay
 		frame.pCommandList->CopyBufferRegion(pTarget, targetOffset, frame.ringBuffer.getDXResource(), uploadBufferOffset, dataSize);
 	}
 
-	static void addVertex(std::vector<uint32_t>& indices, std::vector<Vertex>& verticiesData, const Vertex& newVertex)
+	static void addVertex(std::vector<uint32_t>& indices, std::vector<Vertex>& verticiesData, Vertex newVertex)
 	{
 		uint32_t idx = INVALID_UINT32;
 		int startIdx = glm::max((int)verticiesData.size() - 5, 0); // Lmao
@@ -263,7 +279,7 @@ namespace Okay
 		}
 	}
 
-	static void generateChunkMesh(const World* pWorld, ChunkID chunkID, ThreadSafeChunkMesh* pChunkMesh, uint32_t chunkGenID, glm::uvec2 textureSheetDims, ChunkMeshData& outMeshData)
+	static void generateChunkMesh(const World* pWorld, ChunkID chunkID, ThreadSafeChunkMesh* pChunkMesh, uint32_t chunkGenID, ChunkMeshData& outMeshData)
 	{
 		glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkID);
 		glm::ivec3 worldCoord = chunkCoordToWorldCoord(chunkCoord);
@@ -301,13 +317,13 @@ namespace Okay
 			// Top
 			if (pWorld->getBlockAtBlockCoord(worldBlockCoord + UP_DIR) == 0)
 			{
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), 2, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 1), 2, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), 2, textureSheetDims));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), 2));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 1), 2));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), 2));
 
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), 2, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), 2, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), 2, textureSheetDims));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), 2));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), 2));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), 2));
 
 				sideTextureIdx = 1;
 			}
@@ -315,61 +331,61 @@ namespace Okay
 			// Bottom
 			if (pWorld->getBlockAtBlockCoord(worldBlockCoord - UP_DIR) == 0)
 			{
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), 0, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 0), 0, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), 0, textureSheetDims));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), 0));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 0), 0));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), 0));
 
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), 0, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), 0, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), 0, textureSheetDims));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), 0));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), 0));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), 0));
 			}
 
 			// Right
 			if (pWorld->getBlockAtBlockCoord(worldBlockCoord + RIGHT_DIR) == 0)
 			{
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), sideTextureIdx, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(1, 0), sideTextureIdx, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), sideTextureIdx, textureSheetDims));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), sideTextureIdx));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(1, 0), sideTextureIdx));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), sideTextureIdx));
 
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), sideTextureIdx, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), sideTextureIdx, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), sideTextureIdx, textureSheetDims));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), sideTextureIdx));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), sideTextureIdx));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), sideTextureIdx));
 			}
 
 			// Left
 			if (pWorld->getBlockAtBlockCoord(worldBlockCoord - RIGHT_DIR) == 0)
 			{
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), sideTextureIdx, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(0, 0), sideTextureIdx, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), sideTextureIdx, textureSheetDims));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), sideTextureIdx));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(0, 0), sideTextureIdx));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), sideTextureIdx));
 
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(1, 1), sideTextureIdx, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), sideTextureIdx, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), sideTextureIdx, textureSheetDims));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(1, 1), sideTextureIdx));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), sideTextureIdx));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), sideTextureIdx));
 			}
 
 			// Forward
 			if (pWorld->getBlockAtBlockCoord(worldBlockCoord + FORWARD_DIR) == 0)
 			{
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), sideTextureIdx, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 0), sideTextureIdx, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), sideTextureIdx, textureSheetDims));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), sideTextureIdx));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 0), sideTextureIdx));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), sideTextureIdx));
 
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), sideTextureIdx, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(0, 1), sideTextureIdx, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), sideTextureIdx, textureSheetDims));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), sideTextureIdx));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(0, 1), sideTextureIdx));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), sideTextureIdx));
 			}
 
 			// Backward
 			if (pWorld->getBlockAtBlockCoord(worldBlockCoord - FORWARD_DIR) == 0)
 			{
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), sideTextureIdx, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(0, 0), sideTextureIdx, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), sideTextureIdx, textureSheetDims));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), sideTextureIdx));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(0, 0), sideTextureIdx));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), sideTextureIdx));
 
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), sideTextureIdx, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(1, 1), sideTextureIdx, textureSheetDims));
-				addVertex(indices, vertices, Vertex(worldBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), sideTextureIdx, textureSheetDims));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), sideTextureIdx));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(1, 1), sideTextureIdx));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), sideTextureIdx));
 			}
 		}
 	}
@@ -390,11 +406,11 @@ namespace Okay
 		// Not sure if should be static or not, prolly doesn't really matter :3
 		static const glm::ivec2 OFFSETS[] =
 		{
-			glm::ivec2(0,  0),
+			glm::ivec2( 0,  0),
 			glm::ivec2(-1,  0),
-			glm::ivec2(1,  0),
-			glm::ivec2(0, -1),
-			glm::ivec2(0,  1),
+			glm::ivec2( 1,  0),
+			glm::ivec2( 0, -1),
+			glm::ivec2( 0,  1),
 		};
 
 		for (ChunkID chunkID : world.getAddedChunks())
@@ -405,8 +421,6 @@ namespace Okay
 				ChunkID adjacentChunkID = chunkCoordToChunkID(chunkCoord + offset);
 				if (!world.isChunkLoaded(adjacentChunkID))
 					continue;
-
-				glm::uvec2 textureSheetDims = glm::uvec2((uint32_t)m_pTextureSheet->GetDesc().Width, m_pTextureSheet->GetDesc().Height);
 
 				uint32_t chunkGenID = INVALID_UINT32;
 				auto adjacentChunkIterator = m_loadingChunkMesh.find(adjacentChunkID);
@@ -430,7 +444,7 @@ namespace Okay
 				ThreadPool::queueJob([=]()
 					{
 						ChunkMeshData outMeshData;
-						generateChunkMesh(pWorld, adjacentChunkID, pThreadChunk, chunkGenID, textureSheetDims, outMeshData);
+						generateChunkMesh(pWorld, adjacentChunkID, pThreadChunk, chunkGenID, outMeshData);
 
 						if (pThreadChunk->latestChunkGenID == chunkGenID)
 						{
@@ -1092,10 +1106,11 @@ namespace Okay
 	{
 		std::vector<D3D12_ROOT_PARAMETER> rootParams;
 		rootParams.emplace_back(createRootParamCBV(D3D12_SHADER_VISIBILITY_ALL, 0, 0));
+		rootParams.emplace_back(createRootParamCBV(D3D12_SHADER_VISIBILITY_VERTEX, 1, 0));
 		rootParams.emplace_back(createRootParamSRV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0));
 
 		D3D12_DESCRIPTOR_RANGE textureRange = createRangeSRV(1, 0, 1, 0);
-		rootParams.emplace_back(createRootParamTable(D3D12_SHADER_VISIBILITY_PIXEL, &textureRange, 1));
+		rootParams.emplace_back(createRootParamTable(D3D12_SHADER_VISIBILITY_ALL, &textureRange, 1));
 
 		D3D12_STATIC_SAMPLER_DESC pointSampler = createDefaultStaticPointSamplerDesc();
 		pointSampler.Filter = D3D12_FILTER_MIN_MAG_POINT_MIP_LINEAR;

@@ -3,9 +3,6 @@
 #include "ResourceArena.h"
 #include "Engine/World/Chunk.h"
 
-#include <thread>
-#include <atomic>
-
 namespace Okay
 {
 	constexpr uint32_t TEXTURE_SHEET_TILE_SIZE = 16;
@@ -58,27 +55,29 @@ namespace Okay
 	struct Vertex
 	{
 		Vertex() = default;
-		Vertex(const glm::ivec3& position, const glm::vec2& globalUV, uint32_t textureID, const glm::uvec2& sheetDims)
-			:position(position)
+		Vertex(const glm::ivec3& position, const glm::vec2& globalUV, uint32_t textureID)
 		{
-			// This calculation breaks if sheetDims.x == TILE_SIZE but it's okay :3
-			uint32_t numXTextures = sheetDims.x / (TEXTURE_SHEET_TILE_SIZE + TEXTURE_SHEET_PADDING / 2);
+			data = 0;
+			writeBits(position.x, 0, 5);
+			writeBits(position.y, 5, 9);
+			writeBits(position.z, 14, 5);
 
-			glm::vec2 tileCoords = glm::vec2(textureID % numXTextures, textureID / numXTextures);
-			glm::vec2 invSheetDims = 1.f / (glm::vec2)sheetDims;
-
-			uv = globalUV;
-			uv *= invSheetDims * (float)TEXTURE_SHEET_TILE_SIZE;
-			uv += tileCoords * float(TEXTURE_SHEET_TILE_SIZE + TEXTURE_SHEET_PADDING) * invSheetDims;
+			writeBits((uint32_t)globalUV.x, 19, 1);
+			writeBits((uint32_t)globalUV.y, 20, 1);
+			writeBits(textureID, 21, 8);
 		}
 
-		bool operator==(const Vertex& other)
+		void writeBits(uint32_t value, uint32_t bitPos, uint32_t numBits)
 		{
-			return position == other.position && uv == other.uv;
+			data |= value << (32 - (bitPos + numBits));
 		}
 
-		glm::ivec3 position = glm::ivec3(0);
-		glm::vec2 uv = glm::vec2(0.f);
+		bool operator==(Vertex other) const
+		{
+			return data == other.data;
+		}
+
+		uint32_t data = INVALID_UINT32;
 	};
 
 	struct ChunkMeshData

@@ -48,6 +48,8 @@ namespace Okay
 	void RingBuffer::alignOffset(uint32_t alignment)
 	{
 		m_bufferOffset = alignUint64(m_bufferOffset, alignment);
+
+		// maybe ok if offset is aligned to value >= maxSize as long as nothing else is allocated after?
 		OKAY_ASSERT(m_bufferOffset <= m_maxSize);
 	}
 
