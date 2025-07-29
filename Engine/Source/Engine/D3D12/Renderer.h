@@ -129,10 +129,12 @@ namespace Okay
 		void clearFrameGarbage();
 
 		void transitionResource(ID3D12GraphicsCommandList* pCommandList, ID3D12Resource* pResource, D3D12_RESOURCE_STATES beforeState, D3D12_RESOURCE_STATES newState, uint32_t subResource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
-		void updateDefaultHeapResource(ID3D12Resource* pTarget, uint64_t targetOffset, FrameResources& frame, const void* pData, uint64_t dataSize);
+		void updateDefaultHeapResource(ID3D12Resource* pTarget, uint64_t targetOffset, const void* pData, uint64_t dataSize);
 
-		void updateChunks(FrameResources& frame, const World& world);
-		void writeChunkDataToGPU(ChunkID chunkID, const ChunkMeshData& chunkMesh, FrameResources& frame);
+		void updateChunks(const World& world);
+		void processAddedChunks(const World& world);
+		void processLoadingChunkMeshes(const World& world);
+		void writeChunkDataToGPU(ChunkID chunkID, const ChunkMeshData& chunkMesh);
 		void findAndDeleteDXChunk(ChunkID chunkID);
 
 		D3D12_CPU_DESCRIPTOR_HANDLE createRTVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc);
@@ -140,7 +142,9 @@ namespace Okay
 		D3D12_GPU_DESCRIPTOR_HANDLE createSRVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_SHADER_RESOURCE_VIEW_DESC* pDesc);
 		D3D12_GPU_DESCRIPTOR_HANDLE createUAVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_UNORDERED_ACCESS_VIEW_DESC* pDesc);
 
-		D3D12_GPU_VIRTUAL_ADDRESS allocateIntoResourceArena(FrameResources& frame, ResourceArena& arena, ResourceSlot* pOutSlot, const void* pData, uint64_t dataSize);
+		D3D12_GPU_VIRTUAL_ADDRESS allocateIntoResourceArena(ResourceArena& arena, ResourceSlot* pOutSlot, const void* pData, uint64_t dataSize);
+
+		FrameResources& getCurrentFrameResorces();
 
 	private: // Creation
 		void enableDebugLayer();

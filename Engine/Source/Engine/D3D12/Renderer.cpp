@@ -85,7 +85,7 @@ namespace Okay
 
 	void Renderer::render(const World& world)
 	{
-		FrameResources& frame = m_frames[m_pSwapChain->GetCurrentBackBufferIndex()];
+		FrameResources& frame = getCurrentFrameResorces();
 		wait(frame.pFence, frame.fenceValue);
 
 		clearFrameGarbage();
@@ -110,15 +110,15 @@ namespace Okay
 		GPURenderData renderData = {};
 		renderData.viewProjMatrix = glm::transpose(camera.getProjectionMatrix(m_viewport.Width, m_viewport.Height) * camera.transform.getViewMatrix());
 
-		FrameResources& frame = m_frames[m_pSwapChain->GetCurrentBackBufferIndex()];
+		FrameResources& frame = getCurrentFrameResorces();
 		m_renderDataGVA = frame.ringBuffer.allocate(&renderData, sizeof(renderData));
 
-		updateChunks(frame, world);
+		updateChunks(world);
 	}
 
 	void Renderer::preRender()
 	{
-		FrameResources& frame = m_frames[m_pSwapChain->GetCurrentBackBufferIndex()];
+		FrameResources& frame = getCurrentFrameResorces();
 		transitionResource(frame.pCommandList, frame.pBackBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
 		static const float CLEAR_COLOUR[4] = { 0.4f, 0.3f, 0.7f, 0.f };
@@ -128,7 +128,7 @@ namespace Okay
 
 	void Renderer::renderWorld()
 	{
-		FrameResources& frame = m_frames[m_pSwapChain->GetCurrentBackBufferIndex()];
+		FrameResources& frame = getCurrentFrameResorces();
 
 		frame.pCommandList->SetGraphicsRootSignature(m_pVoxelRootSignature);
 		frame.pCommandList->SetPipelineState(m_pVoxelPSO);
@@ -153,7 +153,7 @@ namespace Okay
 
 	void Renderer::postRender()
 	{
-		FrameResources& frame = m_frames[m_pSwapChain->GetCurrentBackBufferIndex()];
+		FrameResources& frame = getCurrentFrameResorces();
 		transitionResource(frame.pCommandList, frame.pBackBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
 
 		execute(frame.pCommandList);
@@ -230,18 +230,13 @@ namespace Okay
 		pCommandList->ResourceBarrier(1, &barrier);
 	}
 
-	void Renderer::updateDefaultHeapResource(ID3D12Resource* pTarget, uint64_t targetOffset, FrameResources& frame, const void* pData, uint64_t dataSize)
+	void Renderer::updateDefaultHeapResource(ID3D12Resource* pTarget, uint64_t targetOffset, const void* pData, uint64_t dataSize)
 	{
-		bool mapped = frame.ringBuffer.getMappedPtr();
-		if (!mapped)
-			frame.ringBuffer.map();
+		FrameResources& frame = getCurrentFrameResorces();
 
 		uint64_t uploadBufferOffset = frame.ringBuffer.getOffset();
 		frame.ringBuffer.allocate(pData, dataSize);
 		frame.pCommandList->CopyBufferRegion(pTarget, targetOffset, frame.ringBuffer.getDXResource(), uploadBufferOffset, dataSize);
-
-		if (!mapped)
-			frame.ringBuffer.unmap();
 	}
 
 	static void addVertex(std::vector<uint32_t>& indices, std::vector<Vertex>& verticiesData, const Vertex& newVertex)
@@ -379,26 +374,33 @@ namespace Okay
 		}
 	}
 
-	void Renderer::updateChunks(FrameResources& frame, const World& world)
+	void Renderer::updateChunks(const World& world)
 	{
 		for (ChunkID chunkID : world.getRemovedChunks())
 		{
 			findAndDeleteDXChunk(chunkID);
 		}
 
+		processAddedChunks(world);
+		processLoadingChunkMeshes(world);
+	}
+
+	void Renderer::processAddedChunks(const World& world)
+	{
+		// Not sure if should be static or not, prolly doesn't really matter :3
+		static const glm::ivec2 OFFSETS[] =
+		{
+			glm::ivec2(0,  0),
+			glm::ivec2(-1,  0),
+			glm::ivec2(1,  0),
+			glm::ivec2(0, -1),
+			glm::ivec2(0,  1),
+		};
+
 		for (ChunkID chunkID : world.getAddedChunks())
 		{
-			const glm::ivec2 offsets[] = 
-			{
-				glm::ivec2( 0,  0),
-				glm::ivec2(-1,  0),
-				glm::ivec2( 1,  0),
-				glm::ivec2( 0, -1),
-				glm::ivec2( 0,  1),
-			};
-
 			glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkID);
-			for (const glm::ivec2& offset : offsets)
+			for (const glm::ivec2& offset : OFFSETS)
 			{
 				ChunkID adjacentChunkID = chunkCoordToChunkID(chunkCoord + offset);
 				if (!world.isChunkLoaded(adjacentChunkID))
@@ -426,18 +428,23 @@ namespace Okay
 
 				const World* pWorld = &world;
 				ThreadPool::queueJob([=]()
-				{
-					ChunkMeshData outMeshData;
-					generateChunkMesh(pWorld, adjacentChunkID, pThreadChunk, chunkGenID, textureSheetDims, outMeshData);
-					
-					if (pThreadChunk->latestChunkGenID == chunkGenID)
 					{
-						pThreadChunk->meshData = std::move(outMeshData);
-						pThreadChunk->meshGenerated.store(true);
-					}
-				});
+						ChunkMeshData outMeshData;
+						generateChunkMesh(pWorld, adjacentChunkID, pThreadChunk, chunkGenID, textureSheetDims, outMeshData);
+
+						if (pThreadChunk->latestChunkGenID == chunkGenID)
+						{
+							pThreadChunk->meshData = std::move(outMeshData);
+							pThreadChunk->meshGenerated.store(true);
+						}
+					});
 			}
 		}
+	}
+
+	void Renderer::processLoadingChunkMeshes(const World& world)
+	{
+		FrameResources& frame = getCurrentFrameResorces();
 
 		bool meshResourcesTranitioned = false;
 		auto chunkIterator = m_loadingChunkMesh.begin();
@@ -465,8 +472,8 @@ namespace Okay
 			}
 
 			findAndDeleteDXChunk(chunkID);
-			writeChunkDataToGPU(chunkID, threadChunk.meshData, frame);
-			
+			writeChunkDataToGPU(chunkID, threadChunk.meshData);
+
 			chunkIterator = m_loadingChunkMesh.erase(chunkIterator);
 		}
 
@@ -484,21 +491,23 @@ namespace Okay
 		}
 	}
 
-	void Renderer::writeChunkDataToGPU(ChunkID chunkID, const ChunkMeshData& chunkMesh, FrameResources& frame)
+	void Renderer::writeChunkDataToGPU(ChunkID chunkID, const ChunkMeshData& chunkMesh)
 	{
+		FrameResources& frame = getCurrentFrameResorces();
+
 		uint64_t vertexDataSize = chunkMesh.vertices.size() * sizeof(Vertex);
 		uint64_t indexDataSize = chunkMesh.indices.size() * sizeof(uint32_t);
 
 		DXChunk& dxChunk = m_dxChunks.emplace_back();
 		dxChunk.chunkID = chunkID;
-		dxChunk.vertexDataGVA = allocateIntoResourceArena(frame, m_gpuVertexData, &dxChunk.vertexDataSlot, chunkMesh.vertices.data(), vertexDataSize);
+		dxChunk.vertexDataGVA = allocateIntoResourceArena(m_gpuVertexData, &dxChunk.vertexDataSlot, chunkMesh.vertices.data(), vertexDataSize);
 		dxChunk.indicesCount = (uint32_t)chunkMesh.indices.size();
-		dxChunk.indicesView.BufferLocation = allocateIntoResourceArena(frame, m_gpuIndicesData, &dxChunk.indicesDataSlot, chunkMesh.indices.data(), indexDataSize);
+		dxChunk.indicesView.BufferLocation = allocateIntoResourceArena(m_gpuIndicesData, &dxChunk.indicesDataSlot, chunkMesh.indices.data(), indexDataSize);
 		dxChunk.indicesView.Format = DXGI_FORMAT_R32_UINT;
 		dxChunk.indicesView.SizeInBytes = (uint32_t)indexDataSize;
 
-		updateDefaultHeapResource(m_gpuVertexData.getDXResource(), dxChunk.vertexDataSlot.offset, frame, chunkMesh.vertices.data(), vertexDataSize);
-		updateDefaultHeapResource(m_gpuIndicesData.getDXResource(), dxChunk.indicesDataSlot.offset, frame, chunkMesh.indices.data(), indexDataSize);
+		updateDefaultHeapResource(m_gpuVertexData.getDXResource(), dxChunk.vertexDataSlot.offset, chunkMesh.vertices.data(), vertexDataSize);
+		updateDefaultHeapResource(m_gpuIndicesData.getDXResource(), dxChunk.indicesDataSlot.offset, chunkMesh.indices.data(), indexDataSize);
 	}
 
 	void Renderer::findAndDeleteDXChunk(ChunkID chunkID)
@@ -565,8 +574,10 @@ namespace Okay
 		return gpuHandle;
 	}
 
-	D3D12_GPU_VIRTUAL_ADDRESS Renderer::allocateIntoResourceArena(FrameResources& frame, ResourceArena& arena, ResourceSlot* pOutSlot, const void* pData, uint64_t dataSize)
+	D3D12_GPU_VIRTUAL_ADDRESS Renderer::allocateIntoResourceArena(ResourceArena& arena, ResourceSlot* pOutSlot, const void* pData, uint64_t dataSize)
 	{
+		FrameResources& frame = getCurrentFrameResorces();
+
 		uint32_t allocatinonHandle = INVALID_UINT32;
 		if (arena.findAllocationSlot(dataSize, &allocatinonHandle))
 			return arena.claimAllocationSlot(dataSize, allocatinonHandle, pOutSlot);
@@ -579,6 +590,11 @@ namespace Okay
 
 		arena.findAllocationSlot(dataSize, &allocatinonHandle);
 		return arena.claimAllocationSlot(dataSize, allocatinonHandle, pOutSlot);
+	}
+
+	FrameResources& Renderer::getCurrentFrameResorces()
+	{
+		return m_frames[m_pSwapChain->GetCurrentBackBufferIndex()];
 	}
 
 	void Renderer::enableDebugLayer()

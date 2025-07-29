@@ -22,64 +22,12 @@ namespace Okay
 	void World::update()
 	{
 		clearUpdatedChunks();
-		std::unique_lock lock(mutis);
-		
 		m_currentCamChunkCoord = chunkIDToChunkCoord(blockCoordToChunkID(m_camera.transform.position));
 
-		auto removeChunkIterator = m_loadedChunks.begin();
-		while (removeChunkIterator != m_loadedChunks.end())
-		{
-			ChunkID chunkID = removeChunkIterator->first;
-			glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkID);
-
-			if (isChunkWithinRenderDistance(chunkCoord))
-			{
-				++removeChunkIterator;
-				continue;
-			}
-
-			removeChunkIterator = m_loadedChunks.erase(removeChunkIterator);
-			m_removedChunks.emplace_back(chunkID);
-		}
-
-
-		auto loadingChunkIterator = m_loadingChunks.begin();
-		while (loadingChunkIterator != m_loadingChunks.end())
-		{
-			ChunkGeneration& chunkGeneration = loadingChunkIterator->second;
-			if (!chunkGeneration.threadFinished.load())
-			{
-				++loadingChunkIterator;
-				continue;
-			}
-
-			ChunkID chunkID = loadingChunkIterator->first;
-			if (!isChunkWithinRenderDistance(chunkIDToChunkCoord(chunkID)))
-			{
-				loadingChunkIterator = m_loadingChunks.erase(loadingChunkIterator);
-				continue;
-			}
-
-			m_loadedChunks[chunkID] = chunkGeneration.chunk;
-			m_addedChunks.emplace_back(chunkID);
-
-			loadingChunkIterator = m_loadingChunks.erase(loadingChunkIterator);
-		}
-
-
-		for (int chunkX = -(int)RENDER_DISTNACE; chunkX <= (int)RENDER_DISTNACE; chunkX++)
-		{
-			for (int chunkZ = -(int)RENDER_DISTNACE; chunkZ <= (int)RENDER_DISTNACE; chunkZ++)
-			{
-				glm::ivec2 chunkCoord = m_currentCamChunkCoord + glm::ivec2(chunkX, chunkZ);
-				ChunkID chunkID = chunkCoordToChunkID(chunkCoord);
-
-				if (isChunkLoaded(chunkID) || isChunkLoading(chunkID) || !isChunkWithinRenderDistance(chunkCoord))
-					continue;
-
-				launchChunkGenerationThread(chunkID);
-			}
-		}
+		std::unique_lock lock(mutis);
+		unloadDistantChunks();
+		processLoadingChunks();
+		tryLoadRenderEligableChunks();
 	}
 
 	uint8_t World::getBlockAtBlockCoord(const glm::ivec3& blockCoord) const
@@ -141,9 +89,69 @@ namespace Okay
 		m_removedChunks.clear();
 	}
 
-	bool World::isChunkWithinRenderDistance(const glm::ivec2& chunkCoord) const
+	void World::unloadDistantChunks()
 	{
-		glm::vec2 chunkMiddle = glm::vec2(chunkCoord);
+		auto chunkIterator = m_loadedChunks.begin();
+		while (chunkIterator != m_loadedChunks.end())
+		{
+			ChunkID chunkID = chunkIterator->first;
+			if (isChunkWithinRenderDistance(chunkID))
+			{
+				++chunkIterator;
+				continue;
+			}
+
+			chunkIterator = m_loadedChunks.erase(chunkIterator);
+			m_removedChunks.emplace_back(chunkID);
+		}
+	}
+
+	void World::processLoadingChunks()
+	{
+		auto chunkIterator = m_loadingChunks.begin();
+		while (chunkIterator != m_loadingChunks.end())
+		{
+			ChunkGeneration& chunkGeneration = chunkIterator->second;
+			if (!chunkGeneration.threadFinished.load())
+			{
+				++chunkIterator;
+				continue;
+			}
+
+			ChunkID chunkID = chunkIterator->first;
+			if (!isChunkWithinRenderDistance(chunkID))
+			{
+				chunkIterator = m_loadingChunks.erase(chunkIterator);
+				continue;
+			}
+
+			m_loadedChunks[chunkID] = chunkGeneration.chunk;
+			m_addedChunks.emplace_back(chunkID);
+
+			chunkIterator = m_loadingChunks.erase(chunkIterator);
+		}
+	}
+
+	void World::tryLoadRenderEligableChunks()
+	{
+		for (int chunkX = -(int)RENDER_DISTNACE; chunkX <= (int)RENDER_DISTNACE; chunkX++)
+		{
+			for (int chunkZ = -(int)RENDER_DISTNACE; chunkZ <= (int)RENDER_DISTNACE; chunkZ++)
+			{
+				glm::ivec2 chunkCoord = m_currentCamChunkCoord + glm::ivec2(chunkX, chunkZ);
+				ChunkID chunkID = chunkCoordToChunkID(chunkCoord);
+
+				if (isChunkLoaded(chunkID) || isChunkLoading(chunkID) || !isChunkWithinRenderDistance(chunkID))
+					continue;
+
+				launchChunkGenerationThread(chunkID);
+			}
+		}
+	}
+
+	bool World::isChunkWithinRenderDistance(ChunkID chunkID) const
+	{
+		glm::vec2 chunkMiddle = glm::vec2(chunkIDToChunkCoord(chunkID));
 		glm::vec2 camChunkMiddle = glm::vec2(m_currentCamChunkCoord);
 		return glm::length2(chunkMiddle - camChunkMiddle) < RENDER_DISTNACE * RENDER_DISTNACE; // wrong lmao
 	}

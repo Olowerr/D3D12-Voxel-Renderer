@@ -42,8 +42,11 @@ namespace Okay
 		void launchChunkGenerationThread(ChunkID chunkID);
 
 		void clearUpdatedChunks();
-		bool isChunkWithinRenderDistance(const glm::ivec2& chunkCoord) const;
+		void unloadDistantChunks();
+		void processLoadingChunks();
+		void tryLoadRenderEligableChunks();
 
+		bool isChunkWithinRenderDistance(ChunkID chunkID) const;
 		bool isChunkLoading(ChunkID chunkID) const;
 
 	private:
