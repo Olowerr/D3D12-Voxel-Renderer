@@ -6,6 +6,7 @@
 
 #include <windows.h>
 #include <string_view>
+#include <functional>
 
 namespace Okay
 {
@@ -27,12 +28,16 @@ namespace Okay
 		GLFWwindow* getGLFWWindow() const;
 
 		void setWindowTitle(std::string_view newTitle);
+		void registerResizeCallback(std::function<void(uint32_t, uint32_t)> callback);
 
 	private:
 		void setInputMode(MouseMode mode);
 		MouseMode getInputMode();
 
+		void onResize(uint32_t width, uint32_t height);
+
 	private:
 		GLFWwindow* m_pGlfwWindow = nullptr;
+		std::vector<std::function<void(uint32_t, uint32_t)>> m_resizeCallbacks;
 	};
 }

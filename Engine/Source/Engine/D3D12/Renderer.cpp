@@ -21,7 +21,7 @@ namespace Okay
 		glm::vec3 chunkWorldPos = glm::vec3(0.f);
 	};
 
-	void Renderer::initialize(const Window& window)
+	void Renderer::initialize(Window& window)
 	{
 #if 0
 		enableDebugLayer();
@@ -45,12 +45,13 @@ namespace Okay
 		createSwapChain(pFactory, window);
 		D3D12_RELEASE(pFactory);
 
+		window.registerResizeCallback(std::bind(&Renderer::onResize, this, std::placeholders::_1, std::placeholders::_2));
+
 		for (FrameResources& frame : m_frames)
 			initializeFrameResources(frame, 100'000'000);
 
 		createVoxelRenderPass();
 
-		// See if you can reduce the size of these and expand when necessary (use FrameGarbage and replace the DXResource in ResourceArena)
 		m_gpuVertexData.initialize(m_pDevice, 1'000'000, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 		m_gpuIndicesData.initialize(m_pDevice, 1'000'000, D3D12_RESOURCE_STATE_INDEX_BUFFER);
 
@@ -91,6 +92,28 @@ namespace Okay
 		m_gpuIndicesData.shutdown();
 	}
 
+	void Renderer::onResize(uint32_t width, uint32_t height)
+	{
+		for (FrameResources& frame : m_frames)
+		{
+			wait(frame.pFence, frame.fenceValue);
+			reset(frame.pCommandAllocator, frame.pCommandList);
+			
+			// Release all in-direct backBuffer references
+			frame.pCommandList->ClearState(nullptr);
+
+			execute(frame.pCommandList);
+			wait(frame.pFence, frame.fenceValue);
+
+			// Release all direct backBuffer references
+			D3D12_RELEASE(frame.pBackBuffer);
+			D3D12_RELEASE(frame.pDepthTexture);
+		}
+
+		m_pSwapChain->ResizeBuffers(MAX_FRAMES_IN_FLIGHT, width, height, DXGI_FORMAT_R8G8B8A8_UNORM, 0);
+		updateBackBufferTextures();
+	}
+
 	void Renderer::render(const World& world)
 	{
 		FrameResources& frame = getCurrentFrameResorces();
@@ -113,14 +136,14 @@ namespace Okay
 
 	void Renderer::updateBuffers(const World& world)
 	{
+		FrameResources& frame = getCurrentFrameResorces();
 		const Camera& camera = world.getCameraConst();
 
 		GPURenderData renderData = {};
-		renderData.viewProjMatrix = glm::transpose(camera.getProjectionMatrix(m_viewport.Width, m_viewport.Height) * camera.transform.getViewMatrix());
+		renderData.viewProjMatrix = glm::transpose(camera.getProjectionMatrix(frame.viewport.Width, frame.viewport.Height) * camera.transform.getViewMatrix());
 		renderData.textureSheetTileSize = TEXTURE_SHEET_TILE_SIZE;
 		renderData.textureSheetPadding = TEXTURE_SHEET_PADDING;
 
-		FrameResources& frame = getCurrentFrameResorces();
 		m_renderDataGVA = frame.ringBuffer.allocate(&renderData, sizeof(renderData));
 
 		updateChunks(world);
@@ -149,8 +172,8 @@ namespace Okay
 		frame.pCommandList->SetGraphicsRootConstantBufferView(0, m_renderDataGVA);
 
 		frame.pCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		frame.pCommandList->RSSetViewports(1, &m_viewport);
-		frame.pCommandList->RSSetScissorRects(1, &m_scissorRect);
+		frame.pCommandList->RSSetViewports(1, &frame.viewport);
+		frame.pCommandList->RSSetScissorRects(1, &frame.scissorRect);
 		frame.pCommandList->OMSetRenderTargets(1, &frame.cpuBackBufferRTV, false, &frame.cpuDepthTextureDSV);
 
 		for (const DXChunk& dxChunk : m_dxChunks)
@@ -689,56 +712,7 @@ namespace Okay
 
 		m_pSwapChain = (IDXGISwapChain3*)pSwapChain;
 
-		for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
-		{
-			FrameResources& frame = m_frames[i];
-
-			// Back Buffer
-			DX_CHECK(m_pSwapChain->GetBuffer(i, IID_PPV_ARGS(&frame.pBackBuffer)));
-			frame.cpuBackBufferRTV = createRTVDescriptor(m_pRTVDescHeap, i, frame.pBackBuffer, nullptr);
-
-
-			// Depth
-			D3D12_RESOURCE_DESC textureDesc = frame.pBackBuffer->GetDesc();
-			textureDesc.Format = DXGI_FORMAT_D32_FLOAT;
-			textureDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-
-			D3D12_HEAP_PROPERTIES heapProperties = {};
-			heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
-			heapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-			heapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
-			heapProperties.CreationNodeMask = 0;
-			heapProperties.VisibleNodeMask = 0;
-
-			D3D12_CLEAR_VALUE clearValue = {};
-			clearValue.Format = textureDesc.Format;
-			clearValue.DepthStencil.Depth = 1.f;
-			clearValue.DepthStencil.Stencil = 0;
-
-			DX_CHECK(m_pDevice->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &textureDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &clearValue, IID_PPV_ARGS(&frame.pDepthTexture)));
-
-			frame.cpuDepthTextureDSV = m_pDSVDescHeap->GetCPUDescriptorHandleForHeapStart();
-			frame.cpuDepthTextureDSV.ptr += (uint64_t)i * m_dsvIncrementSize;
-
-			m_pDevice->CreateDepthStencilView(frame.pDepthTexture, nullptr, frame.cpuDepthTextureDSV);
-
-
-			// Viewport & ScissorRect
-			if (i == 0)
-			{
-				m_viewport.TopLeftX = 0;
-				m_viewport.TopLeftY = 0;
-				m_viewport.Width = (float)textureDesc.Width;
-				m_viewport.Height = (float)textureDesc.Height;
-				m_viewport.MinDepth = 0.f;
-				m_viewport.MaxDepth = 1.f;
-
-				m_scissorRect.left = 0;
-				m_scissorRect.top = 0;
-				m_scissorRect.right = (LONG)textureDesc.Width;
-				m_scissorRect.bottom = (LONG)textureDesc.Height;
-			}
-		}
+		updateBackBufferTextures();
 	}
 
 	void Renderer::initializeFrameResources(FrameResources& frame, uint64_t ringBufferSize)
@@ -764,6 +738,56 @@ namespace Okay
 		D3D12_RELEASE(frame.pDepthTexture);
 
 		frame.ringBuffer.shutdown();
+	}
+
+	void Renderer::updateBackBufferTextures()
+	{
+		D3D12_HEAP_PROPERTIES heapProperties = {};
+		heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+		heapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+		heapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+		heapProperties.CreationNodeMask = 0;
+		heapProperties.VisibleNodeMask = 0;
+
+		D3D12_CLEAR_VALUE clearValue = {};
+		clearValue.DepthStencil.Depth = 1.f;
+		clearValue.DepthStencil.Stencil = 0;
+
+		for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+		{
+			FrameResources& frame = m_frames[i];
+
+			// Back Buffer
+			DX_CHECK(m_pSwapChain->GetBuffer(i, IID_PPV_ARGS(&frame.pBackBuffer)));
+			frame.cpuBackBufferRTV = createRTVDescriptor(m_pRTVDescHeap, i, frame.pBackBuffer, nullptr);
+
+
+			// Depth
+			D3D12_RESOURCE_DESC textureDesc = frame.pBackBuffer->GetDesc();
+			textureDesc.Format = DXGI_FORMAT_D32_FLOAT;
+			textureDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+			clearValue.Format = textureDesc.Format;
+			DX_CHECK(m_pDevice->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &textureDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &clearValue, IID_PPV_ARGS(&frame.pDepthTexture)));
+
+			frame.cpuDepthTextureDSV = m_pDSVDescHeap->GetCPUDescriptorHandleForHeapStart();
+			frame.cpuDepthTextureDSV.ptr += (uint64_t)i * m_dsvIncrementSize;
+
+			m_pDevice->CreateDepthStencilView(frame.pDepthTexture, nullptr, frame.cpuDepthTextureDSV);
+
+
+			// Viewport & ScissorRect
+			frame.viewport.TopLeftX = 0;
+			frame.viewport.TopLeftY = 0;
+			frame.viewport.Width = (float)textureDesc.Width;
+			frame.viewport.Height = (float)textureDesc.Height;
+			frame.viewport.MinDepth = 0.f;
+			frame.viewport.MaxDepth = 1.f;
+
+			frame.scissorRect.left = 0;
+			frame.scissorRect.top = 0;
+			frame.scissorRect.right = (LONG)textureDesc.Width;
+			frame.scissorRect.bottom = (LONG)textureDesc.Height;
+		}
 	}
 
 	ID3D12DescriptorHeap* Renderer::createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors, bool shaderVisible, std::wstring_view name)

@@ -15,6 +15,7 @@ namespace Okay
 		m_pGlfwWindow = glfwCreateWindow((int)windowWidth, (int)windowHeight, windowTitle.data(), nullptr, nullptr);
 		OKAY_ASSERT(m_pGlfwWindow);
 
+		glfwSetWindowUserPointer(m_pGlfwWindow, this);
 		Input::s_pWindow = this;
 
 		// Place window in the center of the screen
@@ -65,6 +66,12 @@ namespace Okay
 			Input::setScrollDelta((float)yOffset);
 		});
 
+		glfwSetFramebufferSizeCallback(m_pGlfwWindow, [](GLFWwindow* pGlfwWindow, int width, int height)
+		{
+			Window* pWindow = (Window*)glfwGetWindowUserPointer(pGlfwWindow);
+			pWindow->onResize((uint32_t)width, (uint32_t)height);
+		});
+
 		glfwShowWindow(m_pGlfwWindow);
 	}
 
@@ -103,6 +110,11 @@ namespace Okay
 		glfwSetWindowTitle(m_pGlfwWindow, newTitle.data());
 	}
 
+	void Window::registerResizeCallback(std::function<void(uint32_t, uint32_t)> callback)
+	{
+		m_resizeCallbacks.emplace_back(callback);
+	}
+
 	void Window::setInputMode(MouseMode mode)
 	{
 		// For now mouse mode should not be changed to anything but these
@@ -114,5 +126,13 @@ namespace Okay
 	MouseMode Window::getInputMode()
 	{
 		return (MouseMode)glfwGetInputMode(m_pGlfwWindow, GLFW_CURSOR);
+	}
+
+	void Window::onResize(uint32_t width, uint32_t height)
+	{
+		for (const std::function<void(uint32_t, uint32_t)>& callback : m_resizeCallbacks)
+		{
+			callback(width, height);
+		}
 	}
 }

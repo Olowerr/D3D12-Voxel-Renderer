@@ -27,6 +27,10 @@ namespace Okay
 		D3D12_CPU_DESCRIPTOR_HANDLE cpuDepthTextureDSV = {};
 
 		RingBuffer ringBuffer;
+
+		// do these need to be frame specific ? I don't think soooo :thonk:
+		D3D12_VIEWPORT viewport = {};
+		D3D12_RECT scissorRect = {};
 	};
 
 	struct DXChunk
@@ -107,8 +111,10 @@ namespace Okay
 		Renderer() = default;
 		~Renderer() = default;
 
-		void initialize(const Window& window);
+		void initialize(Window& window);
 		void shutdown();
+
+		void onResize(uint32_t width, uint32_t height);
 
 		void render(const World& world);
 
@@ -152,8 +158,11 @@ namespace Okay
 		void createDevice(IDXGIFactory* pFactory);
 		void createCommandQueue();
 		void createSwapChain(IDXGIFactory* pFactory, const Window& window);
+		
 		void initializeFrameResources(FrameResources& frame, uint64_t ringBufferSize);
 		void shutdowFrameResources(FrameResources& frame);
+		void updateBackBufferTextures();
+
 
 		ID3D12RootSignature* createRootSignature(const D3D12_ROOT_SIGNATURE_DESC* pDesc, std::wstring_view name);
 		ID3D12DescriptorHeap* createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors, bool shaderVisible, std::wstring_view name);
@@ -179,9 +188,6 @@ namespace Okay
 
 		ID3D12RootSignature* m_pVoxelRootSignature = nullptr;
 		ID3D12PipelineState* m_pVoxelPSO = nullptr;
-
-		D3D12_VIEWPORT m_viewport = {}; // Move to FrameResources? :spinthink:
-		D3D12_RECT m_scissorRect = {}; // Move to FrameResources? :spinthink:
 
 		D3D12_GPU_VIRTUAL_ADDRESS m_renderDataGVA = INVALID_UINT64;
 
