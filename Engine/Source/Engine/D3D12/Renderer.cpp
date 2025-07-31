@@ -334,13 +334,13 @@ namespace Okay
 			{
 				uint32_t textureId = getTextureID(block, BlockSide::TOP);
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 1), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 0));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 1), textureId, 0));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId, 0));
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId, 0));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId, 0));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 0));
 			}
 
 			// Bottom
@@ -348,13 +348,13 @@ namespace Okay
 			{
 				uint32_t textureId = getTextureID(block, BlockSide::BOTTOM);
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 0), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 1));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 0), textureId, 1));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), textureId, 1));
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), textureId, 1));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), textureId, 1));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 1));
 			}
 
 			// Right
@@ -362,13 +362,13 @@ namespace Okay
 			{
 				uint32_t textureId = getTextureID(block, BlockSide::SIDE);
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(1, 0), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId, 2));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(1, 0), textureId, 2));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 2));
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId, 2));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 2));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), textureId, 2));
 			}
 
 			// Left
@@ -376,13 +376,13 @@ namespace Okay
 			{
 				uint32_t textureId = getTextureID(block, BlockSide::SIDE);
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(0, 0), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), textureId, 3));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(0, 0), textureId, 3));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 3));
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(1, 1), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(1, 1), textureId, 3));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), textureId, 3));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 3));
 			}
 
 			// Forward
@@ -390,13 +390,13 @@ namespace Okay
 			{
 				uint32_t textureId = getTextureID(block, BlockSide::SIDE);
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 0), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), textureId, 4));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 0), textureId, 4));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), textureId, 4));
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(0, 1), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), textureId, 4));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(0, 1), textureId, 4));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), textureId, 4));
 			}
 
 			// Backward
@@ -404,13 +404,13 @@ namespace Okay
 			{
 				uint32_t textureId = getTextureID(block, BlockSide::SIDE);
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(0, 0), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), textureId, 5));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(0, 0), textureId, 5));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), textureId, 5));
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(1, 1), textureId));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), textureId, 5));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(1, 1), textureId, 5));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), textureId, 5));
 			}
 		}
 	}

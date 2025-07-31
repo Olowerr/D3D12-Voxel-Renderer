@@ -59,7 +59,7 @@ namespace Okay
 	struct Vertex
 	{
 		Vertex() = default;
-		Vertex(const glm::ivec3& position, const glm::vec2& globalUV, uint32_t textureID)
+		Vertex(const glm::ivec3& position, const glm::vec2& globalUV, uint32_t textureID, uint32_t sideIdx)
 		{
 			data = 0;
 			writeBits(position.x, 0, 5);
@@ -69,6 +69,7 @@ namespace Okay
 			writeBits((uint32_t)globalUV.x, 19, 1);
 			writeBits((uint32_t)globalUV.y, 20, 1);
 			writeBits(textureID, 21, 8);
+			writeBits(sideIdx, 29, 3);
 		}
 
 		void writeBits(uint32_t value, uint32_t bitPos, uint32_t numBits)

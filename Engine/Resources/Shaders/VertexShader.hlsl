@@ -19,9 +19,11 @@ VoxelVSOutput main(uint vertexId : SV_VertexID)
     globalUV.y = (float)extractData(vertex.data, 20, 1);
     
     uint textureID = extractData(vertex.data, 21, 8);
+    uint sideIdx = extractData(vertex.data, 29, 3);
     
     output.svPosition = mul(float4(float3(position), 1.f), renderCB.viewProjMatrix);
     output.uv = calculateUVCoords(globalUV, textureID);
+    output.sideIdx = sideIdx;
     
     return output;
 }

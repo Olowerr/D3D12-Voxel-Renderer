@@ -1,4 +1,14 @@
 
+static const float3 SIDE_NORMALS[6] =
+{
+    float3( 0.f,  1.f,  0.f),
+    float3( 0.f, -1.f,  0.f),
+    float3( 1.f,  0.f,  0.f),
+    float3(-1.f,  0.f,  0.f),
+    float3( 0.f,  0.f,  1.f),
+    float3( 0.f,  0.f, -1.f),
+};
+
 struct RenderData
 {
     float4x4 viewProjMatrix;
@@ -16,6 +26,7 @@ struct VoxelVSOutput
 {
     float4 svPosition : SV_POSITION;
     float2 uv : UV;
+    uint sideIdx : SIDE_IDX;
 };
 
 struct Vertex
@@ -32,6 +43,7 @@ struct Vertex
     (bool) globalUV.x : pos: 19  |  num: 1  |  total: 20
     (bool) globalUV.y : pos: 20  |  num: 1  |  total: 21
     (uint) textureID  : pos: 21  |  num: 8  |  total: 29
+    (uint) sideIdx    : pos: 29  |  num: 3  |  total: 32
     */
 };
 
