@@ -136,17 +136,22 @@ namespace Okay
 
 	void World::tryLoadRenderEligableChunks()
 	{
-		for (int chunkX = -(int)RENDER_DISTNACE; chunkX <= (int)RENDER_DISTNACE; chunkX++)
+		for (int i = 0; i < RENDER_DISTNACE; i++)
 		{
-			for (int chunkZ = -(int)RENDER_DISTNACE; chunkZ <= (int)RENDER_DISTNACE; chunkZ++)
+			for (int chunkX = -i; chunkX <= i; chunkX++)
 			{
-				glm::ivec2 chunkCoord = m_currentCamChunkCoord + glm::ivec2(chunkX, chunkZ);
-				ChunkID chunkID = chunkCoordToChunkID(chunkCoord);
+				int zIncrement = chunkX == -i || chunkX == i ? 1 : i * 2;
 
-				if (isChunkLoaded(chunkID) || isChunkLoading(chunkID) || !isChunkWithinRenderDistance(chunkID))
-					continue;
+				for (int chunkZ = -i; chunkZ <= i; chunkZ += zIncrement)
+				{
+					glm::ivec2 chunkCoord = m_currentCamChunkCoord + glm::ivec2(chunkX, chunkZ);
+					ChunkID chunkID = chunkCoordToChunkID(chunkCoord);
 
-				launchChunkGenerationThread(chunkID);
+					if (isChunkLoaded(chunkID) || isChunkLoading(chunkID) || !isChunkWithinRenderDistance(chunkID))
+						continue;
+
+					launchChunkGenerationThread(chunkID);
+				}
 			}
 		}
 	}
