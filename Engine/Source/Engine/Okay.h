@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <string>
+#include <algorithm>
 
 // Will be defined to not check in dist builds
 #define OKAY_ASSERT(condition)																	\
@@ -23,8 +25,9 @@ namespace Okay
 	typedef std::filesystem::path FilePath;
 
 	inline const FilePath RESOURCES_PATH = FilePath("..") / "Engine" / "resources";
+	inline const FilePath TEXTURES_PATH = RESOURCES_PATH / "textures";
 
-	constexpr uint8_t  INVALID_UINT8 = UINT8_MAX;
+	constexpr uint8_t  INVALID_UINT8  = UINT8_MAX;
 	constexpr uint16_t INVALID_UINT16 = UINT16_MAX;
 	constexpr uint32_t INVALID_UINT32 = UINT32_MAX;
 	constexpr uint64_t INVALID_UINT64 = UINT64_MAX;
@@ -48,5 +51,18 @@ namespace Okay
 		output.assign(std::istreambuf_iterator<char>(reader), std::istreambuf_iterator<char>());
 
 		return true;
+	}
+
+	inline std::string strToLowerCase(const std::string& string)
+	{
+		// https://stackoverflow.com/questions/313970/how-to-convert-an-instance-of-stdstring-to-lower-case
+
+		std::string result = string;
+		std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c)
+			{
+				return std::tolower(c);
+			});
+
+		return std::move(result);
 	}
 }

@@ -30,10 +30,10 @@ namespace Okay
 		tryLoadRenderEligableChunks();
 	}
 
-	uint8_t World::getBlockAtBlockCoord(const glm::ivec3& blockCoord) const
+	BlockType World::getBlockAtBlockCoord(const glm::ivec3& blockCoord) const
 	{
 		if (blockCoord.y < 0 || blockCoord.y >= WORLD_HEIGHT)
-			return 0;
+			return BlockType::AIR;
 
 		ChunkID chunkID = blockCoordToChunkID(blockCoord);
 
@@ -43,11 +43,11 @@ namespace Okay
 		return tryGetBlock(chunkID, chunkBlockIdx);
 	}
 
-	uint8_t World::tryGetBlock(ChunkID chunkID, uint32_t blockIdx) const
+	BlockType World::tryGetBlock(ChunkID chunkID, uint32_t blockIdx) const
 	{
 		std::shared_lock lock(mutis);
 		const Chunk* pChunk = tryGetChunk(chunkID);
-		return pChunk ? pChunk->blocks[blockIdx] : INVALID_UINT8;
+		return pChunk ? pChunk->blocks[blockIdx] : BlockType::INVALID;
 	}
 
 	Camera& World::getCamera()
@@ -179,17 +179,25 @@ namespace Okay
 			{
 				//glm::ivec3 blockCoord = chunkBlockCoordToBlockCoord(chunkID, { x, 0, z });
 
-				float height1 = glm::sin((x / 30.f) * glm::pi<float>()) * 16.f;
-				float height2 = glm::sin((z / 30.f) * glm::pi<float>()) * 16.f;
+				float height1 = glm::sin((x / 30.f) * glm::pi<float>()) * 32.f;
+				float height2 = glm::sin((z / 30.f) * glm::pi<float>()) * 32.f;
 
 				height1 = glm::abs(height1);
 				height2 = glm::abs(height2);
 
 				uint32_t columnHeight = (uint32_t)glm::floor(20.f + (height1 + height2) * 0.5f);
 
-				for (uint32_t y = 0; y < columnHeight; y++)
+				uint32_t grassDepth = 4;
+				uint32_t stoneHeight = (uint32_t)glm::max((int)columnHeight - (int)grassDepth, 0);
+
+				for (uint32_t y = 0; y < stoneHeight; y++)
 				{
-					chunk.blocks[chunkBlockCoordToChunkBlockIdx({ x, y, z })] = 1;
+					chunk.blocks[chunkBlockCoordToChunkBlockIdx({ x, y, z })] = BlockType::STONE;
+				}
+
+				for (uint32_t y = stoneHeight; y < columnHeight; y++)
+				{
+					chunk.blocks[chunkBlockCoordToChunkBlockIdx({ x, y, z })] = y < columnHeight - 1 ? BlockType::DIRT : BlockType::GRASS;
 				}
 			}
 		}

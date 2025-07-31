@@ -101,6 +101,15 @@ namespace Okay
 		ChunkMeshData meshData;
 	};
 
+	struct SideTextureIDs
+	{
+		SideTextureIDs()
+		{
+			for (uint8_t& id : sideIDs)
+				id = INVALID_UINT8;
+		}
+		uint8_t sideIDs[3] = {};
+	};
 
 	class Renderer
 	{
@@ -141,6 +150,8 @@ namespace Okay
 		void processLoadingChunkMeshes(const World& world);
 		void writeChunkDataToGPU(ChunkID chunkID, const ChunkMeshData& chunkMesh);
 		void findAndDeleteDXChunk(ChunkID chunkID);
+		void generateChunkMesh(const World* pWorld, ChunkID chunkID, ThreadSafeChunkMesh* pChunkMesh, uint32_t chunkGenID, ChunkMeshData& outMeshData);
+
 
 		D3D12_CPU_DESCRIPTOR_HANDLE createRTVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc);
 		D3D12_CPU_DESCRIPTOR_HANDLE createDSVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_DEPTH_STENCIL_VIEW_DESC* pDesc);
@@ -168,9 +179,10 @@ namespace Okay
 		ID3D12DescriptorHeap* createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors, bool shaderVisible, std::wstring_view name);
 		ID3D12Resource* createCommittedBuffer(uint64_t size, D3D12_RESOURCE_STATES initialState, D3D12_HEAP_TYPE heapType, std::wstring_view name);
 
-		ID3D12Resource* createTextureSheet(const FilePath& filePath, FrameResources& frame, uint32_t padding, uint32_t tileSize, std::wstring_view name);
-		void uploadTextureSheetData(ID3D12Resource* pTarget, FrameResources& frame, uint8_t* pTextureData, uint32_t origTextureWidth, uint32_t origTextureHeight, uint32_t padding, uint32_t tileSize);
+		ID3D12Resource* createTextureSheet(FrameResources& frame);
+		void uploadTextureSheetData(ID3D12Resource* pTarget, FrameResources& frame, const std::unordered_map<std::string, uint32_t>& textureIds);
 		void generateTextureSheetMipMaps(ID3D12Resource* pTextureSheet, uint32_t tileSize);
+		uint32_t getTextureID(BlockType blockType, BlockSide blockSide);
 
 		void createVoxelRenderPass();
 
@@ -199,6 +211,9 @@ namespace Okay
 
 		ID3D12Resource* m_pTextureSheet = nullptr;
 		D3D12_GPU_DESCRIPTOR_HANDLE m_textureHandle = {};
+
+		// can maybe be vector instead? idx 0 is air tho but 3-6 extra bytes don't really matter
+		std::unordered_map<BlockType, SideTextureIDs> m_textureIds;
 
 	private:
 		uint32_t m_rtvIncrementSize = INVALID_UINT32;

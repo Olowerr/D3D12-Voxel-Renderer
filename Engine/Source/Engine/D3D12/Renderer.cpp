@@ -59,7 +59,7 @@ namespace Okay
 		initializeFrameResources(initFrame, 100'000);
 		reset(initFrame.pCommandAllocator, initFrame.pCommandList);
 
-		m_pTextureSheet = createTextureSheet(RESOURCES_PATH / "Textures" / "TextureSheet.png", initFrame, TEXTURE_SHEET_PADDING, TEXTURE_SHEET_TILE_SIZE, L"TextureSheet");
+		m_pTextureSheet = createTextureSheet(initFrame);
 		m_textureHandle = createSRVDescriptor(m_pTextureDescHeap, 0, m_pTextureSheet, nullptr);
 
 		flush(initFrame.pCommandList, initFrame.pCommandAllocator, initFrame.pFence, initFrame.fenceValue);
@@ -302,7 +302,7 @@ namespace Okay
 		}
 	}
 
-	static void generateChunkMesh(const World* pWorld, ChunkID chunkID, ThreadSafeChunkMesh* pChunkMesh, uint32_t chunkGenID, ChunkMeshData& outMeshData)
+	void Renderer::generateChunkMesh(const World* pWorld, ChunkID chunkID, ThreadSafeChunkMesh* pChunkMesh, uint32_t chunkGenID, ChunkMeshData& outMeshData)
 	{
 		glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkID);
 		glm::ivec3 worldCoord = chunkCoordToWorldCoord(chunkCoord);
@@ -318,97 +318,99 @@ namespace Okay
 			if (pChunkMesh->latestChunkGenID != chunkGenID)
 				return;
 
-			uint8_t block = pWorld->tryGetBlock(chunkID, i);
-			if (block == INVALID_UINT8) // Chunk is no longer loaded
+			BlockType block = pWorld->tryGetBlock(chunkID, i);
+			if (block == BlockType::INVALID) // Chunk is no longer loaded
 				return;
 
-			if (block == 0)
+			if (block == BlockType::AIR)
 				continue;
 
 			glm::ivec3 chunkBlockCoord = chunkBlockIdxToChunkBlockCoord(i);
 			glm::ivec3 worldBlockCoord = chunkBlockCoord + worldCoord;
 
-			uint32_t sideTextureIdx = 0; // should not be here but is oki for now :]
-
-			/*
-				I think this can be improved, addVertex doesn't need to be called for EVERY vertex right?
-				tbh it might not even be neccessary at all...
-				since the vertex can only be shared within the quad (since uv coords on other blocks still vary even for vertices with the same pos and textureID)
-				so we KNOW(?) that 2 specific verticies can be shared (where the triangles meet), and the others are unique, RIGHT??
-			*/
 
 			// Top
-			if (pWorld->getBlockAtBlockCoord(worldBlockCoord + UP_DIR) == 0)
+			if (pWorld->getBlockAtBlockCoord(worldBlockCoord + UP_DIR) == BlockType::AIR)
 			{
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), 2));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 1), 2));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), 2));
+				uint32_t textureId = getTextureID(block, BlockSide::TOP);
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), 2));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), 2));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), 2));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 1), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId));
 
-				sideTextureIdx = 1;
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId));
 			}
 
 			// Bottom
-			if (pWorld->getBlockAtBlockCoord(worldBlockCoord - UP_DIR) == 0)
+			if (pWorld->getBlockAtBlockCoord(worldBlockCoord - UP_DIR) == BlockType::AIR)
 			{
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), 0));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 0), 0));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), 0));
+				uint32_t textureId = getTextureID(block, BlockSide::BOTTOM);
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), 0));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), 0));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), 0));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 0), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), textureId));
+
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId));
 			}
 
 			// Right
-			if (pWorld->getBlockAtBlockCoord(worldBlockCoord + RIGHT_DIR) == 0)
+			if (pWorld->getBlockAtBlockCoord(worldBlockCoord + RIGHT_DIR) == BlockType::AIR)
 			{
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), sideTextureIdx));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(1, 0), sideTextureIdx));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), sideTextureIdx));
+				uint32_t textureId = getTextureID(block, BlockSide::SIDE);
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), sideTextureIdx));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), sideTextureIdx));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), sideTextureIdx));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(1, 0), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId));
+
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), textureId));
 			}
 
 			// Left
-			if (pWorld->getBlockAtBlockCoord(worldBlockCoord - RIGHT_DIR) == 0)
+			if (pWorld->getBlockAtBlockCoord(worldBlockCoord - RIGHT_DIR) == BlockType::AIR)
 			{
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), sideTextureIdx));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(0, 0), sideTextureIdx));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), sideTextureIdx));
+				uint32_t textureId = getTextureID(block, BlockSide::SIDE);
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(1, 1), sideTextureIdx));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), sideTextureIdx));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), sideTextureIdx));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(0, 0), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId));
+
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(1, 1), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId));
 			}
 
 			// Forward
-			if (pWorld->getBlockAtBlockCoord(worldBlockCoord + FORWARD_DIR) == 0)
+			if (pWorld->getBlockAtBlockCoord(worldBlockCoord + FORWARD_DIR) == BlockType::AIR)
 			{
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), sideTextureIdx));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 0), sideTextureIdx));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), sideTextureIdx));
+				uint32_t textureId = getTextureID(block, BlockSide::SIDE);
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), sideTextureIdx));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(0, 1), sideTextureIdx));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), sideTextureIdx));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 0), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), textureId));
+
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(0, 1), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), textureId));
 			}
 
 			// Backward
-			if (pWorld->getBlockAtBlockCoord(worldBlockCoord - FORWARD_DIR) == 0)
+			if (pWorld->getBlockAtBlockCoord(worldBlockCoord - FORWARD_DIR) == BlockType::AIR)
 			{
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), sideTextureIdx));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(0, 0), sideTextureIdx));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), sideTextureIdx));
+				uint32_t textureId = getTextureID(block, BlockSide::SIDE);
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), sideTextureIdx));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(1, 1), sideTextureIdx));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), sideTextureIdx));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(0, 0), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), textureId));
+
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(1, 1), textureId));
+				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), textureId));
 			}
 		}
 	}
@@ -834,21 +836,48 @@ namespace Okay
 		return pResource;
 	}
 
-	ID3D12Resource* Renderer::createTextureSheet(const FilePath& filePath, FrameResources& frame, uint32_t padding, uint32_t tileSize, std::wstring_view name)
+	ID3D12Resource* Renderer::createTextureSheet(FrameResources& frame)
 	{
-		int textureWidth = 0;
-		int textureHeight = 0;
-		uint8_t* pTextureData = stbi_load(filePath.string().c_str(), &textureWidth, &textureHeight, nullptr, STBI_rgb_alpha);
-		OKAY_ASSERT(pTextureData);
+		std::unordered_map<BlockType, BlockTextures> textureNames;
+		findBlockTextures(textureNames);
 
-		uint32_t numXTiles = textureWidth / tileSize;
-		uint32_t numYTiles = textureHeight / tileSize;
+		std::unordered_map<std::string, uint32_t> textureNameToId;
+		uint32_t textureID = 0;
+		for (const auto& blockTextures : textureNames)
+		{
+			const BlockTextures& textures = blockTextures.second;
+			for (const std::string& texture : textures.textures)
+			{
+				if (textureNameToId.contains(texture))
+					continue;
+
+				textureNameToId[texture] = textureID++;
+			}
+		}
+
+		// Store texture IDs for use during rendering
+		for (const auto& blockTextures : textureNames)
+		{
+			BlockType blockType = blockTextures.first;
+			const BlockTextures& textures = blockTextures.second;
+
+			for (uint32_t i = 0; i < 3; i++)
+			{
+				m_textureIds[blockType].sideIDs[i] = textureNameToId[textures.textures[i]];
+			}
+		}
+
+		uint32_t numXTiles = (uint32_t)glm::ceil(glm::sqrt(textureNameToId.size()));
+		uint32_t numYTiles = (uint32_t)glm::ceil((float)textureNameToId.size() / (float)numXTiles);
+
+		uint32_t textureSheetWidth = numXTiles * TEXTURE_SHEET_TILE_SIZE + (numXTiles - 1) * TEXTURE_SHEET_PADDING;
+		uint32_t textureSheetHeight = numYTiles * TEXTURE_SHEET_TILE_SIZE + (numYTiles - 1) * TEXTURE_SHEET_PADDING;
 
 		D3D12_RESOURCE_DESC desc = {};
 		desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
 		desc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
-		desc.Width = (uint64_t)textureWidth + (numXTiles - 1ull) * padding;
-		desc.Height = (uint32_t)textureHeight + (numYTiles - 1ull) * padding;
+		desc.Width = (uint64_t)textureSheetWidth;
+		desc.Height = (uint32_t)textureSheetHeight;
 		desc.DepthOrArraySize = 1;
 		desc.MipLevels = 0; // 0 means max possible mipLevels (ID3D12Resource::GetDesc().MipLevels will be set to the real value)
 		desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -866,15 +895,15 @@ namespace Okay
 
 		ID3D12Resource* pTexture = nullptr;
 		DX_CHECK(m_pDevice->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&pTexture)));
+		pTexture->SetName(L"TextureSheet");
 
-		pTexture->SetName(name.data());
-		uploadTextureSheetData(pTexture, frame, pTextureData, (uint32_t)textureWidth, (uint32_t)textureHeight, padding, tileSize);
+		uploadTextureSheetData(pTexture, frame, textureNameToId);
 		transitionResource(frame.pCommandList, pTexture, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON);
 
 		return pTexture;
 	}
 
-	void Renderer::uploadTextureSheetData(ID3D12Resource* pTarget, FrameResources& frame, uint8_t* pTextureData, uint32_t origTextureWidth, uint32_t origTextureHeight, uint32_t padding, uint32_t tileSize)
+	void Renderer::uploadTextureSheetData(ID3D12Resource* pTarget, FrameResources& frame, const std::unordered_map<std::string, uint32_t>& textureIds)
 	{
 		D3D12_RESOURCE_DESC resourceDesc = pTarget->GetDesc();
 		D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
@@ -882,32 +911,42 @@ namespace Okay
 		uint64_t totalSizeInBytes = INVALID_UINT64;
 		m_pDevice->GetCopyableFootprints(&resourceDesc, 0, 1, 0, &footprint, nullptr, &rowSizeInBytes, &totalSizeInBytes);
 
-		uint32_t numXTiles = origTextureWidth / tileSize;
-		uint32_t numYTiles = origTextureHeight / tileSize;
-		uint32_t sourceTextureRowPitch = tileSize * numXTiles * 4;
+		uint32_t padding = TEXTURE_SHEET_PADDING;
+		uint32_t tileSize = TEXTURE_SHEET_TILE_SIZE;
+
+		uint32_t numXTiles = (uint32_t)resourceDesc.Width / (TEXTURE_SHEET_TILE_SIZE + padding) + 1;
+		uint32_t numYTiles = resourceDesc.Height / (TEXTURE_SHEET_TILE_SIZE + padding) + 1;
 
 		uint8_t* pMappedBuffer = frame.ringBuffer.map();
 
-
 		// Copy source texture data into ringBuffer, taking padding into consideration
-		for (uint32_t yTex = 0; yTex < numYTiles; yTex++)
+		for (const auto& textureInfo : textureIds)
 		{
-			for (uint32_t xTex = 0; xTex < numXTiles; xTex++)
+			const std::string& textureName = textureInfo.first;
+			uint32_t textureId = textureInfo.second;
+
+			uint32_t xSlot = textureId % numXTiles;
+			uint32_t ySlot = textureId / numYTiles;
+
+
+			uint8_t* pTarget = pMappedBuffer +
+				xSlot * (tileSize + padding) * 4 +
+				ySlot * (tileSize + padding) * footprint.Footprint.RowPitch;
+
+			int sourceWidth, sourceHeight;
+			std::string texturePath = (TEXTURES_PATH / (textureName + ".png")).string();
+			
+			uint8_t* pSource = stbi_load(texturePath.c_str(), &sourceWidth, &sourceHeight, nullptr, STBI_rgb_alpha);
+			OKAY_ASSERT(pSource);
+
+			for (uint32_t i = 0; i < tileSize; i++)
 			{
-				uint8_t* pTarget = pMappedBuffer +
-					xTex * (tileSize + padding) * 4 +
-					yTex * (tileSize + padding) * footprint.Footprint.RowPitch;
-
-				uint8_t* pSource = pTextureData +
-					xTex * tileSize * 4 +
-					yTex * tileSize * sourceTextureRowPitch;
-
-				for (uint32_t i = 0; i < tileSize; i++)
-				{
-					memcpy(pTarget + i * footprint.Footprint.RowPitch, pSource + i * sourceTextureRowPitch, tileSize * 4ull);
-				}
+				memcpy(pTarget + i * footprint.Footprint.RowPitch, pSource + i * TEXTURE_SHEET_TILE_SIZE * 4, tileSize * 4ull);
 			}
+
+			stbi_image_free(pSource);
 		}
+
 
 		// Fill in column padding
 		for (uint32_t xTex = 0; xTex < numXTiles - 1; xTex++)
@@ -1101,6 +1140,11 @@ namespace Okay
 		D3D12_RELEASE(pDescriptorHeap);
 		D3D12_RELEASE(pUAVTexture);
 		D3D12_RELEASE(pComputeFence);
+	}
+
+	uint32_t Renderer::getTextureID(BlockType blockType, BlockSide blockSide)
+	{
+		return m_textureIds[blockType].sideIDs[blockSide];
 	}
 
 	ID3D12RootSignature* Renderer::createRootSignature(const D3D12_ROOT_SIGNATURE_DESC* pDesc, std::wstring_view name)

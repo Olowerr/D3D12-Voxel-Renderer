@@ -1,5 +1,6 @@
 #pragma once
 #include "Engine/Okay.h"
+#include "Blocks.h"
 
 #include <thread>
 #include <atomic>
@@ -20,10 +21,10 @@ namespace Okay
 	{
 		Chunk()
 		{
-			for (uint8_t& block : blocks)
-				block = 0;
+			for (BlockType& block : blocks)
+				block = BlockType::AIR;
 		}
-		uint8_t blocks[MAX_BLOCKS_IN_CHUNK] = {};
+		BlockType blocks[MAX_BLOCKS_IN_CHUNK] = {};
 	};
 
 	constexpr uint32_t chunkBlockCoordToChunkBlockIdx(const glm::ivec3& chunkBlockCoord)

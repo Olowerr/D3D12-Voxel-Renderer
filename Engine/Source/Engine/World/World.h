@@ -23,8 +23,8 @@ namespace Okay
 
 		void update();
 
-		uint8_t getBlockAtBlockCoord(const glm::ivec3& blockCoord) const;
-		uint8_t tryGetBlock(ChunkID chunkID, uint32_t blockIdx) const;
+		BlockType getBlockAtBlockCoord(const glm::ivec3& blockCoord) const;
+		BlockType tryGetBlock(ChunkID chunkID, uint32_t blockIdx) const;
 
 		Chunk& getChunk(ChunkID chunkID);
 		const Chunk& getChunkConst(ChunkID chunkID) const;
