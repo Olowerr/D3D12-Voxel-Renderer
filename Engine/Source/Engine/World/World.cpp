@@ -3,12 +3,14 @@
 #include "../Application/Input.h"
 #include "Engine/Utilities/ThreadPool.h"
 
+#include "sivPerlinNoise/PerlinNoise.hpp"
+
 #include <shared_mutex>
 #include <chrono>
 
 namespace Okay
 {
-	static const uint32_t RENDER_DISTNACE = 16;
+	static const uint32_t RENDER_DISTNACE = 32;
 	static std::shared_mutex mutis;
 
 	World::World()
@@ -173,19 +175,21 @@ namespace Okay
 	
 	static void generateChunk(Chunk& chunk, ChunkID chunkID)
 	{
+		siv::PerlinNoise::seed_type seed = 123456u;
+		siv::PerlinNoise perlin{ seed };
+
+		float frequency = 1 / 100.f;
+		int32_t octaves = 4;
+
 		for (uint32_t x = 0; x < CHUNK_WIDTH; x++)
 		{
 			for (uint32_t z = 0; z < CHUNK_WIDTH; z++)
 			{
-				//glm::ivec3 blockCoord = chunkBlockCoordToBlockCoord(chunkID, { x, 0, z });
+				glm::ivec3 blockCoord = chunkBlockCoordToBlockCoord(chunkID, { x, 0, z });
+				float noise = perlin.octave2D_01(blockCoord.x * frequency, blockCoord.z * frequency, octaves);
+				noise = glm::pow(noise, 5.f);
 
-				float height1 = glm::sin((x / 30.f) * glm::pi<float>()) * 32.f;
-				float height2 = glm::sin((z / 30.f) * glm::pi<float>()) * 32.f;
-
-				height1 = glm::abs(height1);
-				height2 = glm::abs(height2);
-
-				uint32_t columnHeight = (uint32_t)glm::floor(20.f + (height1 + height2) * 0.5f);
+				uint32_t columnHeight = uint32_t(noise * 200.f + 1);
 
 				uint32_t grassDepth = 4;
 				uint32_t stoneHeight = (uint32_t)glm::max((int)columnHeight - (int)grassDepth, 0);
