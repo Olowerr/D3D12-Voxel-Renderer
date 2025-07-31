@@ -1,5 +1,7 @@
 #include "Application.h"
 #include "Engine/Utilities/ThreadPool.h"
+#include "ImguiHelper.h"
+
 
 namespace Okay
 {
@@ -32,6 +34,7 @@ namespace Okay
 			frameTimer.reset();
 
 			m_window.processMessages();
+			imguiNewFrame();
 
 			onUpdate(timeStep);
 			m_world.update();

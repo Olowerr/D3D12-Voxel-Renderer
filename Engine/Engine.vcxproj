@@ -19,7 +19,16 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Deps\Include\imgui\imconfig.h" />
+    <ClInclude Include="Deps\Include\imgui\imgui.h" />
+    <ClInclude Include="Deps\Include\imgui\imgui_impl_dx12.h" />
+    <ClInclude Include="Deps\Include\imgui\imgui_impl_glfw.h" />
+    <ClInclude Include="Deps\Include\imgui\imgui_internal.h" />
+    <ClInclude Include="Deps\Include\imgui\imstb_rectpack.h" />
+    <ClInclude Include="Deps\Include\imgui\imstb_textedit.h" />
+    <ClInclude Include="Deps\Include\imgui\imstb_truetype.h" />
     <ClInclude Include="Source\Engine\Application\Application.h" />
+    <ClInclude Include="Source\Engine\Application\ImguiHelper.h" />
     <ClInclude Include="Source\Engine\Application\Input.h" />
     <ClInclude Include="Source\Engine\Application\KeyCodes.h" />
     <ClInclude Include="Source\Engine\Application\Time.h" />
@@ -37,7 +46,15 @@
     <ClInclude Include="Source\Engine\World\World.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Deps\Include\imgui\imgui.cpp" />
+    <ClCompile Include="Deps\Include\imgui\imgui_demo.cpp" />
+    <ClCompile Include="Deps\Include\imgui\imgui_draw.cpp" />
+    <ClCompile Include="Deps\Include\imgui\imgui_impl_dx12.cpp" />
+    <ClCompile Include="Deps\Include\imgui\imgui_impl_glfw.cpp" />
+    <ClCompile Include="Deps\Include\imgui\imgui_tables.cpp" />
+    <ClCompile Include="Deps\Include\imgui\imgui_widgets.cpp" />
     <ClCompile Include="Source\Engine\Application\Application.cpp" />
+    <ClCompile Include="Source\Engine\Application\ImguiHelper.cpp" />
     <ClCompile Include="Source\Engine\Application\Input.cpp" />
     <ClCompile Include="Source\Engine\Application\Window.cpp" />
     <ClCompile Include="Source\Engine\D3D12\Renderer.cpp" />

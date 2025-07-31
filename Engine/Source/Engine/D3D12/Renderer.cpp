@@ -2,6 +2,7 @@
 #include "Engine/Application/Window.h"
 #include "Engine/World/World.h"
 #include "Engine/Utilities/ThreadPool.h"
+#include "Engine/Application/ImguiHelper.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
@@ -66,6 +67,10 @@ namespace Okay
 		shutdowFrameResources(initFrame);
 
 		generateTextureSheetMipMaps(m_pTextureSheet, TEXTURE_SHEET_TILE_SIZE);
+
+		// In this version of Imgui, only 1 SRV is needed, it's stated that future versions will need more, but I don't see a reason to switch version atm :]
+		m_pImguiDescriptorHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, true, L"Imgui");
+		imguiInitialize(window, m_pDevice, m_pCommandQueue, m_pImguiDescriptorHeap, MAX_FRAMES_IN_FLIGHT);
 	}
 
 	void Renderer::shutdown()
@@ -90,6 +95,9 @@ namespace Okay
 
 		m_gpuVertexData.shutdown();
 		m_gpuIndicesData.shutdown();
+
+		D3D12_RELEASE(m_pImguiDescriptorHeap);
+		imguiShutdown();
 	}
 
 	void Renderer::onResize(uint32_t width, uint32_t height)
@@ -193,6 +201,10 @@ namespace Okay
 	void Renderer::postRender()
 	{
 		FrameResources& frame = getCurrentFrameResorces();
+		
+		frame.pCommandList->SetDescriptorHeaps(1, &m_pImguiDescriptorHeap);
+		imguiEndFrame(frame.pCommandList);
+
 		transitionResource(frame.pCommandList, frame.pBackBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
 
 		execute(frame.pCommandList);

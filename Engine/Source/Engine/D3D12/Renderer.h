@@ -153,7 +153,6 @@ namespace Okay
 		void findAndDeleteDXChunk(ChunkID chunkID);
 		void generateChunkMesh(const World* pWorld, ChunkID chunkID, ThreadSafeChunkMesh* pChunkMesh, uint32_t chunkGenID, ChunkMeshData& outMeshData);
 
-
 		D3D12_CPU_DESCRIPTOR_HANDLE createRTVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc);
 		D3D12_CPU_DESCRIPTOR_HANDLE createDSVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_DEPTH_STENCIL_VIEW_DESC* pDesc);
 		D3D12_GPU_DESCRIPTOR_HANDLE createSRVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_SHADER_RESOURCE_VIEW_DESC* pDesc);
@@ -221,5 +220,6 @@ namespace Okay
 		uint32_t m_dsvIncrementSize = INVALID_UINT32;
 		uint32_t m_cbvSrvUavIncrementSize = INVALID_UINT32;
 
+		ID3D12DescriptorHeap* m_pImguiDescriptorHeap = nullptr;
 	};
 }
