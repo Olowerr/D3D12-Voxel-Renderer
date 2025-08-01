@@ -1,6 +1,7 @@
 #include "App.h"
 
 #include "glm/common.hpp"
+#include "imgui/imgui.h"
 
 using namespace Okay;
 
@@ -12,12 +13,15 @@ App::App()
 void App::onUpdate(TimeStep dt)
 {
 	updateCamera(dt);
+	handleImgui();
 
 	static TimeStep passedTime = 0;
 	static uint32_t numFrames = 0;
 
 	passedTime += dt;
 	numFrames++;
+
+	//printf("%.4f\n", dt * 1000.f);
 
 	if (passedTime >= 1.f)
 	{
@@ -32,7 +36,7 @@ void App::onUpdate(TimeStep dt)
 		glm::vec3 camPos = m_world.getCamera().transform.position;
 		glm::ivec2 chunkCoord = chunkIDToChunkCoord(blockCoordToChunkID(camPos));
 
-		printf("(%d, %d) | (%.1f, %.1f, %.1f)\n", chunkCoord.x, chunkCoord.y, camPos.x, camPos.y, camPos.z);
+		//printf("(%d, %d) | (%.1f, %.1f, %.1f)\n", chunkCoord.x, chunkCoord.y, camPos.x, camPos.y, camPos.z);
 	}
 }
 
@@ -45,9 +49,7 @@ void App::updateCamera(TimeStep dt)
 	}
 
 	if (Input::getMouseMode() == MouseMode::FREE)
-	{
 		return;
-	}
 
 	Camera& camera = m_world.getCamera();
 	Transform& camTransform = camera.transform;
@@ -89,4 +91,46 @@ void App::updateCamera(TimeStep dt)
 
 	// Zoom
 	camera.fov = glm::clamp(camera.fov - Input::getScrollDelta(), 5.f, 90.f);
+}
+
+void App::handleImgui()
+{
+	ImGui::ShowDemoWindow();
+
+	if (!ImGui::Begin("World Generation"))
+	{
+		ImGui::End();
+		return;
+	}
+
+	static float s_frequencyDenominator = 1.f / m_world.getWorldGenFrequency();
+	static float s_persistance = m_world.getWorldGenPersistance();
+	static float s_amplitude = m_world.getWorldGenAmplitude();
+	static uint32_t s_numOctaves = m_world.getWorldGenOctaves();
+	static uint32_t s_seed = m_world.getWorldGenSeed();
+
+	ImGui::DragFloat("Frequency Denominator", &s_frequencyDenominator);
+	ImGui::DragFloat("Persistance", &s_persistance, 0.01f);
+	ImGui::DragFloat("Amplitude", &s_amplitude, 0.1f);
+	ImGui::DragInt("Num Octaves", (int*)&s_numOctaves, 0.2f);
+	ImGui::DragInt("Seed", (int*)&s_seed, 0.2f);
+
+	if (ImGui::Button("Reload World"))
+	{
+		m_world.setWorldGenFrequency(1.f / s_frequencyDenominator);
+		m_world.setWorldGenPersistance(s_persistance);
+		m_world.setWorldGenAmplitude(s_amplitude);
+		m_world.setWorldGenOctaves(s_numOctaves);
+		m_world.setWorldGenSeed(s_seed);
+
+		m_world.reloadWorld();
+		m_renderer.unloadChunks();
+	}
+	
+	if (ImGui::Button("Clear"))
+	{
+		system("cls");
+	}
+
+	ImGui::End();
 }

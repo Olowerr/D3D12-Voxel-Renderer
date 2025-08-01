@@ -7,6 +7,8 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
 
+#include <shared_mutex>
+
 namespace Okay
 {
 	struct GPURenderData
@@ -21,6 +23,8 @@ namespace Okay
 	{
 		glm::vec3 chunkWorldPos = glm::vec3(0.f);
 	};
+
+	static std::shared_mutex s_loadingChunksMutis;
 
 	void Renderer::initialize(Window& window)
 	{
@@ -71,6 +75,9 @@ namespace Okay
 		// In this version of Imgui, only 1 SRV is needed, it's stated that future versions will need more, but I don't see a reason to switch version atm :]
 		m_pImguiDescriptorHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, true, L"Imgui");
 		imguiInitialize(window, m_pDevice, m_pCommandQueue, m_pImguiDescriptorHeap, MAX_FRAMES_IN_FLIGHT);
+
+
+		m_loadingChunkMesh.reserve(2000);
 	}
 
 	void Renderer::shutdown()
@@ -122,6 +129,20 @@ namespace Okay
 		updateBackBufferTextures();
 	}
 
+	void Renderer::unloadChunks()
+	{
+		// Incase frames are still reading the vertex & index data
+		for (FrameResources& frame : m_frames)
+			wait(frame.pFence, frame.fenceValue);
+
+		m_dxChunks.clear();
+		m_gpuVertexData.clear();
+		m_gpuIndicesData.clear();
+
+		std::unique_lock lock(s_loadingChunksMutis);
+		m_loadingChunkMesh.clear();
+	}
+
 	void Renderer::render(const World& world)
 	{
 		FrameResources& frame = getCurrentFrameResorces();
@@ -130,7 +151,6 @@ namespace Okay
 		clearFrameGarbage();
 		reset(frame.pCommandAllocator, frame.pCommandList);
 
-		//printf("frame: %u\n", m_pSwapChain->GetCurrentBackBufferIndex());
 		frame.ringBuffer.jumpToStart();
 		frame.ringBuffer.map();
 
@@ -314,7 +334,7 @@ namespace Okay
 		}
 	}
 
-	void Renderer::generateChunkMesh(const World* pWorld, ChunkID chunkID, ThreadSafeChunkMesh* pChunkMesh, uint32_t chunkGenID, ChunkMeshData& outMeshData)
+	void Renderer::generateChunkMesh(const World* pWorld, ChunkID chunkID, uint32_t chunkGenID, ChunkMeshData& outMeshData)
 	{
 		glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkID);
 		glm::ivec3 worldCoord = chunkCoordToWorldCoord(chunkCoord);
@@ -327,8 +347,17 @@ namespace Okay
 
 		for (uint32_t i = 0; i < MAX_BLOCKS_IN_CHUNK; i++)
 		{
-			if (pChunkMesh->latestChunkGenID != chunkGenID)
+			std::shared_lock lock(s_loadingChunksMutis);
+
+			const auto& chunkIterator = m_loadingChunkMesh.find(chunkID);
+			if (chunkIterator == m_loadingChunkMesh.end())
 				return;
+
+			if (chunkIterator->second.latestChunkGenID != chunkGenID)
+				return;
+
+			lock.unlock();
+
 
 			BlockType block = pWorld->tryGetBlock(chunkID, i);
 			if (block == BlockType::INVALID) // Chunk is no longer loaded
@@ -434,6 +463,7 @@ namespace Okay
 			findAndDeleteDXChunk(chunkID);
 		}
 
+		std::unique_lock lock(s_loadingChunksMutis);
 		processAddedChunks(world);
 		processLoadingChunkMeshes(world);
 	}
@@ -461,32 +491,37 @@ namespace Okay
 
 				uint32_t chunkGenID = INVALID_UINT32;
 				auto adjacentChunkIterator = m_loadingChunkMesh.find(adjacentChunkID);
-				ThreadSafeChunkMesh* pThreadChunk = nullptr;
 
 				if (adjacentChunkIterator != m_loadingChunkMesh.end())
 				{
-					pThreadChunk = &adjacentChunkIterator->second;
-					chunkGenID = ++pThreadChunk->latestChunkGenID;
+					ThreadSafeChunkMesh& chunkMesh = adjacentChunkIterator->second;
+					chunkGenID = ++chunkMesh.latestChunkGenID;
+					chunkMesh.meshGenerated.store(false);
 				}
 				else
 				{
-					pThreadChunk = &m_loadingChunkMesh[adjacentChunkID];
-					pThreadChunk->latestChunkGenID = 0;
+					ThreadSafeChunkMesh& chunkMesh = m_loadingChunkMesh[adjacentChunkID];
+					chunkMesh.latestChunkGenID = 0;
 					chunkGenID = 0;
+					chunkMesh.meshGenerated.store(false);
 				}
-
-				pThreadChunk->meshGenerated.store(false);
 
 				const World* pWorld = &world;
 				ThreadPool::queueJob([=]()
 					{
 						ChunkMeshData outMeshData;
-						generateChunkMesh(pWorld, adjacentChunkID, pThreadChunk, chunkGenID, outMeshData);
+						generateChunkMesh(pWorld, adjacentChunkID, chunkGenID, outMeshData);
 
-						if (pThreadChunk->latestChunkGenID == chunkGenID)
+						std::shared_lock lock(s_loadingChunksMutis);
+						auto chunkIterator = m_loadingChunkMesh.find(adjacentChunkID);
+						if (chunkIterator == m_loadingChunkMesh.end())
+							return;
+
+						ThreadSafeChunkMesh& threadChunk = chunkIterator->second;
+						if (threadChunk.latestChunkGenID == chunkGenID)
 						{
-							pThreadChunk->meshData = std::move(outMeshData);
-							pThreadChunk->meshGenerated.store(true);
+							threadChunk.meshData = std::move(outMeshData);
+							threadChunk.meshGenerated.store(true);
 						}
 					});
 			}

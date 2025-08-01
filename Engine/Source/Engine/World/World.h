@@ -3,6 +3,7 @@
 #include "Chunk.h"
 #include "Camera.h"
 
+#include <atomic>
 #include <unordered_map>
 
 namespace Okay
@@ -13,6 +14,7 @@ namespace Okay
 		struct ChunkGeneration
 		{
 			std::atomic<bool> threadFinished;
+			std::atomic<bool> cancel;
 			ChunkID chunkID = INVALID_CHUNK_ID;
 			Chunk chunk;
 		};
@@ -38,8 +40,22 @@ namespace Okay
 		Camera& getCamera();
 		const Camera& getCameraConst() const;
 
+		void setWorldGenFrequency(float frequency);
+		void setWorldGenPersistance(float persistance);
+		void setWorldGenAmplitude(float amplitude);
+		void setWorldGenOctaves(uint32_t octaves);
+		void setWorldGenSeed(uint32_t seed);
+		void reloadWorld();
+
+		float getWorldGenFrequency() const;
+		float getWorldGenPersistance() const;
+		float getWorldGenAmplitude() const;
+		uint32_t getWorldGenOctaves() const;
+		uint32_t getWorldGenSeed() const;
+
 	private:
 		void launchChunkGenerationThread(ChunkID chunkID);
+		void generateChunk(ChunkGeneration* pChunkGeneration);
 
 		void clearUpdatedChunks();
 		void unloadDistantChunks();
@@ -58,5 +74,12 @@ namespace Okay
 
 		std::vector<ChunkID> m_addedChunks;
 		std::vector<ChunkID> m_removedChunks;
+
+		// Make into struct
+		float m_worldGenFrequency = 0.01f;
+		float m_worldGenPersistance = 0.5f;
+		float m_worldGenAmplitude = 200.f;
+		uint32_t m_worldGenOctaves = 4;
+		uint32_t m_worldGenSeed = 0;
 	};
 }

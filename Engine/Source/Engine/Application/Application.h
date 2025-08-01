@@ -21,8 +21,7 @@ namespace Okay
 	protected:
 		Window m_window;
 		World m_world;
-
-	private:
 		Renderer m_renderer;
+
 	};
 }

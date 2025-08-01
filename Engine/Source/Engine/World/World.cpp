@@ -6,7 +6,6 @@
 #include "sivPerlinNoise/PerlinNoise.hpp"
 
 #include <shared_mutex>
-#include <chrono>
 
 namespace Okay
 {
@@ -15,6 +14,7 @@ namespace Okay
 
 	World::World()
 	{
+		m_camera.farZ = (RENDER_DISTNACE + 2) * CHUNK_WIDTH;
 	}
 
 	World::~World()
@@ -60,6 +60,69 @@ namespace Okay
 	const Camera& World::getCameraConst() const
 	{
 		return m_camera;
+	}
+
+	void World::setWorldGenFrequency(float frequency)
+	{
+		m_worldGenFrequency = frequency;
+	}
+
+	void World::setWorldGenPersistance(float persistance)
+	{
+		m_worldGenPersistance = persistance;
+	}
+
+	void World::setWorldGenAmplitude(float amplitude)
+	{
+		m_worldGenAmplitude = amplitude;
+	}
+
+	void World::setWorldGenOctaves(uint32_t octaves)
+	{
+		m_worldGenOctaves = octaves;
+	}
+
+	void World::setWorldGenSeed(uint32_t seed)
+	{
+		m_worldGenSeed = seed;
+	}
+
+	void World::reloadWorld()
+	{
+		std::unique_lock lock(mutis);
+
+		m_loadedChunks.clear();
+
+		for (auto& loadingChunkData : m_loadingChunks)
+		{
+			ChunkGeneration& chunkGeneration = loadingChunkData.second;
+			chunkGeneration.cancel.store(true);
+		}
+	}
+
+	float World::getWorldGenFrequency() const
+	{
+		return m_worldGenFrequency;
+	}
+
+	float World::getWorldGenPersistance() const
+	{
+		return m_worldGenPersistance;
+	}
+
+	float World::getWorldGenAmplitude() const
+	{
+		return m_worldGenAmplitude;
+	}
+
+	uint32_t World::getWorldGenOctaves() const
+	{
+		return m_worldGenOctaves;
+	}
+
+	uint32_t World::getWorldGenSeed() const
+	{
+		return m_worldGenSeed;
 	}
 
 	Chunk& World::getChunk(ChunkID chunkID)
@@ -121,7 +184,7 @@ namespace Okay
 			}
 
 			ChunkID chunkID = chunkIterator->first;
-			if (!isChunkWithinRenderDistance(chunkID))
+			if (!isChunkWithinRenderDistance(chunkID) || chunkGeneration.cancel.load())
 			{
 				chunkIterator = m_loadingChunks.erase(chunkIterator);
 				continue;
@@ -178,23 +241,27 @@ namespace Okay
 		return m_removedChunks;
 	}
 	
-	static void generateChunk(Chunk& chunk, ChunkID chunkID)
+	void World::generateChunk(ChunkGeneration* pChunkGeneration)
 	{
-		siv::PerlinNoise::seed_type seed = 123456u;
-		siv::PerlinNoise perlin{ seed };
+		ChunkID chunkID = pChunkGeneration->chunkID;
+		Chunk& chunk = pChunkGeneration->chunk;
+		std::atomic<bool>& cancel = pChunkGeneration->cancel;
 
-		float frequency = 1 / 100.f;
-		int32_t octaves = 4;
+		siv::PerlinNoise::seed_type seed = m_worldGenSeed;
+		siv::PerlinNoise perlin{ seed };
 
 		for (uint32_t x = 0; x < CHUNK_WIDTH; x++)
 		{
 			for (uint32_t z = 0; z < CHUNK_WIDTH; z++)
 			{
+				if (cancel.load())
+					return;
+
 				glm::ivec3 blockCoord = chunkBlockCoordToBlockCoord(chunkID, { x, 0, z });
-				float noise = perlin.octave2D_01(blockCoord.x * frequency, blockCoord.z * frequency, octaves);
+				float noise = perlin.octave2D_01(blockCoord.x * m_worldGenFrequency, blockCoord.z * m_worldGenFrequency, m_worldGenOctaves);
 				noise = glm::pow(noise, 5.f);
 
-				uint32_t columnHeight = uint32_t(noise * 200.f + 1);
+				uint32_t columnHeight = glm::min(uint32_t(noise * m_worldGenAmplitude + 1), WORLD_HEIGHT);
 
 				uint32_t grassDepth = 4;
 				uint32_t stoneHeight = (uint32_t)glm::max((int)columnHeight - (int)grassDepth, 0);
@@ -212,21 +279,18 @@ namespace Okay
 		}
 	}
 
-	static void startChunkGeneration(World::ChunkGeneration* pChunkGeneration)
-	{
-		generateChunk(pChunkGeneration->chunk, pChunkGeneration->chunkID);
-		pChunkGeneration->threadFinished.store(true);
-	}
-
 	void World::launchChunkGenerationThread(ChunkID chunkID)
 	{
-		ChunkGeneration* pChunkGeneration = &m_loadingChunks[chunkID];
-		pChunkGeneration->chunkID = chunkID;
-		pChunkGeneration->threadFinished.store(false);
+		ChunkGeneration& chunkGeneration = m_loadingChunks[chunkID];
+		chunkGeneration.chunkID = chunkID;
+		chunkGeneration.threadFinished.store(false);
+		chunkGeneration.cancel.store(false);
 
+		ChunkGeneration* pChunkGeneration = &chunkGeneration;
 		ThreadPool::queueJob([=]()
 		{
-			startChunkGeneration(pChunkGeneration);
+			generateChunk(pChunkGeneration);
+			pChunkGeneration->threadFinished.store(true);
 		});
 	}
 }

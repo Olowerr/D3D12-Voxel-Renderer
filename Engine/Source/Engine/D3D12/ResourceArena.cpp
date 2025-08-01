@@ -53,6 +53,12 @@ namespace Okay
 		removeAllocation(ResourceSlot(oldSize, newSize - oldSize));
 	}
 
+	void ResourceArena::clear()
+	{
+		m_slots.clear();
+		m_slots.emplace_back(0, m_pDXResource->GetDesc().Width);
+	}
+
 	D3D12_GPU_VIRTUAL_ADDRESS ResourceArena::claimAllocationSlot(uint64_t allocationSize, uint32_t allocationHandle, ResourceSlot* pOutSlot)
 	{
 		OKAY_ASSERT(allocationHandle < m_slots.size());

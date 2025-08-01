@@ -3,7 +3,6 @@
 #include "Blocks.h"
 
 #include <thread>
-#include <atomic>
 #include <vector>
 
 namespace Okay

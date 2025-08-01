@@ -36,8 +36,8 @@ namespace Okay
 			m_window.processMessages();
 			imguiNewFrame();
 
-			onUpdate(timeStep);
 			m_world.update();
+			onUpdate(timeStep);
 
 			m_renderer.render(m_world);
 		}

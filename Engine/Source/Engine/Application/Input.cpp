@@ -1,6 +1,8 @@
 #include "Input.h"
 #include "Window.h"
 
+#include "ImguiHelper.h"
+
 namespace Okay
 {
 	std::unordered_map<Key, bool> Input::s_keysLastFrame;
@@ -50,6 +52,7 @@ namespace Okay
 	void Input::setMouseMode(MouseMode mode)
 	{
 		Input::s_pWindow->setInputMode(mode);
+		imguiToggleMouse(mode == MouseMode::FREE);
 	}
 
 	MouseMode Input::getMouseMode()

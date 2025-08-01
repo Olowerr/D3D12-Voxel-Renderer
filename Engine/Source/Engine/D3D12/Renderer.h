@@ -3,6 +3,8 @@
 #include "ResourceArena.h"
 #include "Engine/World/Chunk.h"
 
+#include <atomic>
+
 namespace Okay
 {
 	constexpr uint32_t TEXTURE_SHEET_TILE_SIZE = 16;
@@ -125,6 +127,7 @@ namespace Okay
 		void shutdown();
 
 		void onResize(uint32_t width, uint32_t height);
+		void unloadChunks();
 
 		void render(const World& world);
 
@@ -151,7 +154,7 @@ namespace Okay
 		void processLoadingChunkMeshes(const World& world);
 		void writeChunkDataToGPU(ChunkID chunkID, const ChunkMeshData& chunkMesh);
 		void findAndDeleteDXChunk(ChunkID chunkID);
-		void generateChunkMesh(const World* pWorld, ChunkID chunkID, ThreadSafeChunkMesh* pChunkMesh, uint32_t chunkGenID, ChunkMeshData& outMeshData);
+		void generateChunkMesh(const World* pWorld, ChunkID chunkID, uint32_t chunkGenID, ChunkMeshData& outMeshData);
 
 		D3D12_CPU_DESCRIPTOR_HANDLE createRTVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc);
 		D3D12_CPU_DESCRIPTOR_HANDLE createDSVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_DEPTH_STENCIL_VIEW_DESC* pDesc);

@@ -10,7 +10,7 @@ namespace Okay
 		float fov = 90.f;
 		float speed = 5.f;
 
-		float nearZ = 0.01f;
+		float nearZ = 0.1f;
 		float farZ = 1000.f;
 
 		inline glm::mat4 getProjectionMatrix(float width, float height) const
