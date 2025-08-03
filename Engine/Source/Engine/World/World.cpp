@@ -62,31 +62,6 @@ namespace Okay
 		return m_camera;
 	}
 
-	void World::setWorldGenFrequency(float frequency)
-	{
-		m_worldGenFrequency = frequency;
-	}
-
-	void World::setWorldGenPersistance(float persistance)
-	{
-		m_worldGenPersistance = persistance;
-	}
-
-	void World::setWorldGenAmplitude(float amplitude)
-	{
-		m_worldGenAmplitude = amplitude;
-	}
-
-	void World::setWorldGenOctaves(uint32_t octaves)
-	{
-		m_worldGenOctaves = octaves;
-	}
-
-	void World::setWorldGenSeed(uint32_t seed)
-	{
-		m_worldGenSeed = seed;
-	}
-
 	void World::reloadWorld()
 	{
 		std::unique_lock lock(mutis);
@@ -98,31 +73,6 @@ namespace Okay
 			ChunkGeneration& chunkGeneration = loadingChunkData.second;
 			chunkGeneration.cancel.store(true);
 		}
-	}
-
-	float World::getWorldGenFrequency() const
-	{
-		return m_worldGenFrequency;
-	}
-
-	float World::getWorldGenPersistance() const
-	{
-		return m_worldGenPersistance;
-	}
-
-	float World::getWorldGenAmplitude() const
-	{
-		return m_worldGenAmplitude;
-	}
-
-	uint32_t World::getWorldGenOctaves() const
-	{
-		return m_worldGenOctaves;
-	}
-
-	uint32_t World::getWorldGenSeed() const
-	{
-		return m_worldGenSeed;
 	}
 
 	Chunk& World::getChunk(ChunkID chunkID)
@@ -247,7 +197,7 @@ namespace Okay
 		Chunk& chunk = pChunkGeneration->chunk;
 		std::atomic<bool>& cancel = pChunkGeneration->cancel;
 
-		siv::PerlinNoise::seed_type seed = m_worldGenSeed;
+		siv::PerlinNoise::seed_type seed = m_worldGenData.seed;
 		siv::PerlinNoise perlin{ seed };
 
 		for (uint32_t x = 0; x < CHUNK_WIDTH; x++)
@@ -258,20 +208,21 @@ namespace Okay
 					return;
 
 				glm::ivec3 blockCoord = chunkBlockCoordToBlockCoord(chunkID, { x, 0, z });
-				float noise = perlin.octave2D_01(blockCoord.x * m_worldGenFrequency, blockCoord.z * m_worldGenFrequency, m_worldGenOctaves);
-				noise = glm::pow(noise, 5.f);
+				float noise = perlin.octave2D_11(blockCoord.x * m_worldGenData.frequency, blockCoord.z * m_worldGenData.frequency, m_worldGenData.octaves);
+				noise = m_worldGenData.noiseInterpolation.sample(noise);
 
-				uint32_t columnHeight = glm::min(uint32_t(noise * m_worldGenAmplitude + 1), WORLD_HEIGHT);
+				int columnHeight = int(noise * m_worldGenData.amplitude + m_worldGenData.oceanHeight);
+				columnHeight = glm::clamp(columnHeight, 1, (int)WORLD_HEIGHT);
 
-				uint32_t grassDepth = 4;
-				uint32_t stoneHeight = (uint32_t)glm::max((int)columnHeight - (int)grassDepth, 0);
+				int grassDepth = 4;
+				int stoneHeight = (int)glm::max((int)columnHeight - (int)grassDepth, 0);
 
-				for (uint32_t y = 0; y < stoneHeight; y++)
+				for (int y = 0; y < stoneHeight; y++)
 				{
 					chunk.blocks[chunkBlockCoordToChunkBlockIdx({ x, y, z })] = BlockType::STONE;
 				}
 
-				for (uint32_t y = stoneHeight; y < columnHeight; y++)
+				for (int y = stoneHeight; y < columnHeight; y++)
 				{
 					chunk.blocks[chunkBlockCoordToChunkBlockIdx({ x, y, z })] = y < columnHeight - 1 ? BlockType::DIRT : BlockType::GRASS;
 				}

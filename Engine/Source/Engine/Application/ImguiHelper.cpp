@@ -5,12 +5,15 @@
 #include "imgui/imgui_impl_glfw.h"
 #include "imgui/imgui_impl_dx12.h"
 
+#include "imgui/implot.h"
+
 namespace Okay
 {
 	void imguiInitialize(const Window& window, ID3D12Device* pDevice, ID3D12CommandQueue* pCommandQueue, ID3D12DescriptorHeap* pImguiDescriptorHeap, uint32_t framesInFlight)
 	{
 		IMGUI_CHECKVERSION();
 		ImGui::CreateContext();
+		ImPlot::CreateContext();
 
 		ImGuiIO& io = ImGui::GetIO();
 		io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
@@ -42,6 +45,7 @@ namespace Okay
 	{
 		ImGui_ImplDX12_Shutdown();
 		ImGui_ImplGlfw_Shutdown();
+		ImPlot::DestroyContext();
 		ImGui::DestroyContext();
 	}
 

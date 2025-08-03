@@ -2,23 +2,36 @@
 
 #include "Chunk.h"
 #include "Camera.h"
+#include "Engine/Utilities/InterpolationList.h"
 
 #include <atomic>
 #include <unordered_map>
 
 namespace Okay
 {
+	struct ChunkGeneration
+	{
+		std::atomic<bool> threadFinished;
+		std::atomic<bool> cancel;
+		ChunkID chunkID = INVALID_CHUNK_ID;
+		Chunk chunk;
+	};
+
+	struct WorldGenerationData
+	{
+		uint32_t seed = 0;
+		uint32_t octaves = 4;
+		float frequency = 0.01f;
+		float persistance = 0.5f;
+		float amplitude = 20.f;
+
+		uint32_t oceanHeight = 70;
+
+		InterpolationList noiseInterpolation = InterpolationList({ -1.f, -1.f }, { 1.f, 1.f });
+	};
+
 	class World
 	{
-	public:
-		struct ChunkGeneration
-		{
-			std::atomic<bool> threadFinished;
-			std::atomic<bool> cancel;
-			ChunkID chunkID = INVALID_CHUNK_ID;
-			Chunk chunk;
-		};
-
 	public:
 		World();
 		~World();
@@ -40,18 +53,8 @@ namespace Okay
 		Camera& getCamera();
 		const Camera& getCameraConst() const;
 
-		void setWorldGenFrequency(float frequency);
-		void setWorldGenPersistance(float persistance);
-		void setWorldGenAmplitude(float amplitude);
-		void setWorldGenOctaves(uint32_t octaves);
-		void setWorldGenSeed(uint32_t seed);
 		void reloadWorld();
-
-		float getWorldGenFrequency() const;
-		float getWorldGenPersistance() const;
-		float getWorldGenAmplitude() const;
-		uint32_t getWorldGenOctaves() const;
-		uint32_t getWorldGenSeed() const;
+		WorldGenerationData m_worldGenData;
 
 	private:
 		void launchChunkGenerationThread(ChunkID chunkID);
@@ -75,11 +78,5 @@ namespace Okay
 		std::vector<ChunkID> m_addedChunks;
 		std::vector<ChunkID> m_removedChunks;
 
-		// Make into struct
-		float m_worldGenFrequency = 0.01f;
-		float m_worldGenPersistance = 0.5f;
-		float m_worldGenAmplitude = 200.f;
-		uint32_t m_worldGenOctaves = 4;
-		uint32_t m_worldGenSeed = 0;
 	};
 }

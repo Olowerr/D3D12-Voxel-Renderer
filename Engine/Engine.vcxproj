@@ -24,6 +24,8 @@
     <ClInclude Include="Deps\Include\imgui\imgui_impl_dx12.h" />
     <ClInclude Include="Deps\Include\imgui\imgui_impl_glfw.h" />
     <ClInclude Include="Deps\Include\imgui\imgui_internal.h" />
+    <ClInclude Include="Deps\Include\imgui\implot.h" />
+    <ClInclude Include="Deps\Include\imgui\implot_internal.h" />
     <ClInclude Include="Deps\Include\imgui\imstb_rectpack.h" />
     <ClInclude Include="Deps\Include\imgui\imstb_textedit.h" />
     <ClInclude Include="Deps\Include\imgui\imstb_truetype.h" />
@@ -39,6 +41,7 @@
     <ClInclude Include="Source\Engine\D3D12\RingBuffer.h" />
     <ClInclude Include="Source\Engine\Okay.h" />
     <ClInclude Include="Source\Engine\Utilities\ThreadPool.h" />
+    <ClInclude Include="Source\Engine\Utilities\InterpolationList.h" />
     <ClInclude Include="Source\Engine\World\Blocks.h" />
     <ClInclude Include="Source\Engine\World\Camera.h" />
     <ClInclude Include="Source\Engine\World\Chunk.h" />
@@ -53,6 +56,9 @@
     <ClCompile Include="Deps\Include\imgui\imgui_impl_glfw.cpp" />
     <ClCompile Include="Deps\Include\imgui\imgui_tables.cpp" />
     <ClCompile Include="Deps\Include\imgui\imgui_widgets.cpp" />
+    <ClCompile Include="Deps\Include\imgui\implot.cpp" />
+    <ClCompile Include="Deps\Include\imgui\implot_demo.cpp" />
+    <ClCompile Include="Deps\Include\imgui\implot_items.cpp" />
     <ClCompile Include="Source\Engine\Application\Application.cpp" />
     <ClCompile Include="Source\Engine\Application\ImguiHelper.cpp" />
     <ClCompile Include="Source\Engine\Application\Input.cpp" />
@@ -60,6 +66,7 @@
     <ClCompile Include="Source\Engine\D3D12\Renderer.cpp" />
     <ClCompile Include="Source\Engine\D3D12\ResourceArena.cpp" />
     <ClCompile Include="Source\Engine\D3D12\RingBuffer.cpp" />
+    <ClCompile Include="Source\Engine\Utilities\InterpolationList.cpp" />
     <ClCompile Include="Source\Engine\Utilities\ThreadPool.cpp" />
     <ClCompile Include="Source\Engine\World\Blocks.cpp" />
     <ClCompile Include="Source\Engine\World\World.cpp" />

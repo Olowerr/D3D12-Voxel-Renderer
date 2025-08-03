@@ -2,6 +2,7 @@
 
 #include "glm/common.hpp"
 #include "imgui/imgui.h"
+#include "imgui/implot.h"
 
 using namespace Okay;
 
@@ -95,42 +96,65 @@ void App::updateCamera(TimeStep dt)
 
 void App::handleImgui()
 {
-	ImGui::ShowDemoWindow();
-
 	if (!ImGui::Begin("World Generation"))
 	{
 		ImGui::End();
 		return;
 	}
 
-	static float s_frequencyDenominator = 1.f / m_world.getWorldGenFrequency();
-	static float s_persistance = m_world.getWorldGenPersistance();
-	static float s_amplitude = m_world.getWorldGenAmplitude();
-	static uint32_t s_numOctaves = m_world.getWorldGenOctaves();
-	static uint32_t s_seed = m_world.getWorldGenSeed();
-
-	ImGui::DragFloat("Frequency Denominator", &s_frequencyDenominator);
-	ImGui::DragFloat("Persistance", &s_persistance, 0.01f);
-	ImGui::DragFloat("Amplitude", &s_amplitude, 0.1f);
-	ImGui::DragInt("Num Octaves", (int*)&s_numOctaves, 0.2f);
-	ImGui::DragInt("Seed", (int*)&s_seed, 0.2f);
-
 	if (ImGui::Button("Reload World"))
 	{
-		m_world.setWorldGenFrequency(1.f / s_frequencyDenominator);
-		m_world.setWorldGenPersistance(s_persistance);
-		m_world.setWorldGenAmplitude(s_amplitude);
-		m_world.setWorldGenOctaves(s_numOctaves);
-		m_world.setWorldGenSeed(s_seed);
-
 		m_world.reloadWorld();
 		m_renderer.unloadChunks();
 	}
-	
-	if (ImGui::Button("Clear"))
-	{
-		system("cls");
-	}
 
+	WorldGenerationData& worldGenData = m_world.m_worldGenData;
+	float frequencyDenominator = 1.f / worldGenData.frequency;
+
+	ImGui::DragInt("Seed", (int*)&worldGenData.seed, 0.2f);
+	ImGui::DragInt("Num Octaves", (int*)&worldGenData.octaves, 0.2f);
+	ImGui::DragInt("Ocean Height", (int*)&worldGenData.oceanHeight, 0.2f);
+	ImGui::DragFloat("Frequency Denominator", &frequencyDenominator);
+	ImGui::DragFloat("Persistance", &worldGenData.persistance, 0.01f);
+	ImGui::DragFloat("Amplitude", &worldGenData.amplitude, 0.1f);
+
+	worldGenData.frequency = 1.f / frequencyDenominator;
+
+	if (ImPlot::BeginPlot("Test"))
+	{
+		ImPlotAxisFlags axisFlags = ImPlotAxisFlags_Lock;
+		ImPlot::SetupAxes(nullptr, nullptr, axisFlags, axisFlags);
+		ImPlot::SetupAxesLimits(-1.2, 1.2, -1.2, 1.2);
+
+		InterpolationList& noiseInterpolation = worldGenData.noiseInterpolation;
+
+		if (ImGui::Button("New Point"))
+		{
+			noiseInterpolation.addPoint(0.f, 0.f);
+		}
+
+		const std::vector<InterpolationList::ListPoint>& points = noiseInterpolation.getPoints();
+
+		static std::vector<ImPlotPoint> imguiPoints;
+		imguiPoints.resize(points.size());
+
+		for (uint64_t i = 0; i < points.size(); i++)
+		{
+			imguiPoints[i] = ImPlotPoint((double)points[i].position, (double)points[i].value);
+			if (ImPlot::DragPoint((int)i, &imguiPoints[i].x, &imguiPoints[i].y, ImVec4(1.f, 0.8f, 0.5f, 1.f)))
+			{
+				noiseInterpolation.updatePoint(i, (float)imguiPoints[i].x, (float)imguiPoints[i].y);
+			}
+
+			if (i > points.size() - 2)
+				continue;
+
+			ImPlot::SetNextLineStyle(ImVec4(1, 0, 0, 1), 1.f);
+			ImPlot::PlotLine("##1", &imguiPoints[i].x, &imguiPoints[i].y, 2, 0, 0, sizeof(ImPlotPoint));
+		}
+
+		ImPlot::EndPlot();
+	}
+	
 	ImGui::End();
 }
