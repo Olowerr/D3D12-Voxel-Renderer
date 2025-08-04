@@ -29,6 +29,12 @@ struct VoxelVSOutput
     uint sideIdx : SIDE_IDX;
 };
 
+struct WaterVSOutput
+{
+    float4 svPosition : SV_POSITION;
+    float2 uv : UV;
+};
+
 struct Vertex
 {
     uint data;

@@ -21,9 +21,9 @@ namespace Okay
 	{
 		uint32_t seed = 0;
 		uint32_t octaves = 4;
-		float frequency = 0.01f;
+		float frequency = 1.f / 150.f;
 		float persistance = 0.5f;
-		float amplitude = 20.f;
+		float amplitude = 70.f;
 
 		uint32_t oceanHeight = 70;
 
@@ -40,6 +40,7 @@ namespace Okay
 
 		BlockType getBlockAtBlockCoord(const glm::ivec3& blockCoord) const;
 		BlockType tryGetBlock(ChunkID chunkID, uint32_t blockIdx) const;
+		bool isBlockCoordSolid(const glm::ivec3& blockCoord) const;
 
 		Chunk& getChunk(ChunkID chunkID);
 		const Chunk& getChunkConst(ChunkID chunkID) const;

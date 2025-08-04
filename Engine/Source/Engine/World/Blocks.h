@@ -15,9 +15,10 @@ namespace Okay
 
 #define BLOCKS_TABLE_MACRO \
 X(AIR, 0) \
-X(DIRT, 1) \
-X(GRASS, 2) \
-X(STONE, 3) \
+X(WATER, 1) \
+X(DIRT, 2) \
+X(GRASS, 3) \
+X(STONE, 4) \
 
 #define X(name, value) name = value,
 	enum struct BlockType : uint8_t

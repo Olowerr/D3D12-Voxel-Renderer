@@ -35,16 +35,25 @@ namespace Okay
 		D3D12_RECT scissorRect = {};
 	};
 
-	struct DXChunk
+	struct GPUMeshInfo
 	{
-		ChunkID chunkID = INVALID_CHUNK_ID;
-
 		D3D12_GPU_VIRTUAL_ADDRESS vertexDataGVA = {};
 		D3D12_INDEX_BUFFER_VIEW indicesView = {};
 		uint32_t indicesCount = INVALID_UINT32;
 
 		ResourceSlot vertexDataSlot;
 		ResourceSlot indicesDataSlot;
+	};
+
+	struct DXChunk
+	{
+		ChunkID chunkID = INVALID_CHUNK_ID;
+
+		GPUMeshInfo blockGPUMeshInfo;
+		GPUMeshInfo waterGPUMeshInfo;
+
+		// Set during rendering
+		D3D12_GPU_VIRTUAL_ADDRESS drawDataGVA = INVALID_UINT64;
 	};
 
 	struct FrameGarbage
@@ -61,6 +70,8 @@ namespace Okay
 	struct Vertex
 	{
 		Vertex() = default;
+
+		// Blocks
 		Vertex(const glm::ivec3& position, const glm::vec2& globalUV, uint32_t textureID, uint32_t sideIdx)
 		{
 			data = 0;
@@ -72,6 +83,21 @@ namespace Okay
 			writeBits((uint32_t)globalUV.y, 20, 1);
 			writeBits(textureID, 21, 8);
 			writeBits(sideIdx, 29, 3);
+		}
+
+		// Water
+		Vertex(const glm::ivec3& position, const glm::vec2& globalUV, uint32_t textureID)
+		{
+			data = 0;
+			writeBits(position.x, 0, 5);
+			writeBits(position.y, 5, 9);
+			writeBits(position.z, 14, 5);
+
+			writeBits((uint32_t)globalUV.x, 19, 1);
+			writeBits((uint32_t)globalUV.y, 20, 1);
+
+			// Kinda unneccessary to store this, option is to store it in GPURenderData, but feels meh
+			writeBits(textureID, 21, 8);
 		}
 
 		void writeBits(uint32_t value, uint32_t bitPos, uint32_t numBits)
@@ -87,10 +113,16 @@ namespace Okay
 		uint32_t data = INVALID_UINT32;
 	};
 
-	struct ChunkMeshData
+	struct MeshData
 	{
 		std::vector<Vertex> vertices;
 		std::vector<uint32_t> indices;
+	};
+
+	struct ChunkMeshData
+	{
+		MeshData blockMesh;
+		MeshData waterMesh;
 	};
 
 	struct ThreadSafeChunkMesh
@@ -137,6 +169,8 @@ namespace Okay
 		void renderWorld();
 		void postRender();
 
+		void drawGPUMeshInfo(const DXChunk& dxChunk, const GPUMeshInfo& gpuMeshInfo);
+
 		void signal(ID3D12Fence* pFence, uint64_t& fenceValue);
 		void execute(ID3D12GraphicsCommandList* pCommandList);
 		void wait(ID3D12Fence* pFence, uint64_t fenceValue);
@@ -152,9 +186,13 @@ namespace Okay
 		void updateChunks(const World& world);
 		void processAddedChunks(const World& world);
 		void processLoadingChunkMeshes(const World& world);
-		void writeChunkDataToGPU(ChunkID chunkID, const ChunkMeshData& chunkMesh);
+
+		void writeMeshData(GPUMeshInfo& gpuMeshInfo, const MeshData& meshData);
 		void findAndDeleteDXChunk(ChunkID chunkID);
+
 		void generateChunkMesh(const World* pWorld, ChunkID chunkID, uint32_t chunkGenID, ChunkMeshData& outMeshData);
+		void addBlockMeshData(const World* pWorld, BlockType block, const glm::ivec3& chunkBlockCoord, const glm::ivec3& worldBlockCoord, MeshData& outMeshData);
+		void addWaterMeshData(const World* pWorld, const glm::ivec3& chunkBlockCoord, const glm::ivec3& worldBlockCoord, MeshData& outMeshData);
 
 		D3D12_CPU_DESCRIPTOR_HANDLE createRTVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc);
 		D3D12_CPU_DESCRIPTOR_HANDLE createDSVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_DEPTH_STENCIL_VIEW_DESC* pDesc);
@@ -203,6 +241,7 @@ namespace Okay
 
 		ID3D12RootSignature* m_pVoxelRootSignature = nullptr;
 		ID3D12PipelineState* m_pVoxelPSO = nullptr;
+		ID3D12PipelineState* m_pWaterPSO = nullptr;
 
 		D3D12_GPU_VIRTUAL_ADDRESS m_renderDataGVA = INVALID_UINT64;
 

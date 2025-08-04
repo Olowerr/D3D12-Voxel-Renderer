@@ -75,9 +75,6 @@ namespace Okay
 		// In this version of Imgui, only 1 SRV is needed, it's stated that future versions will need more, but I don't see a reason to switch version atm :]
 		m_pImguiDescriptorHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, true, L"Imgui");
 		imguiInitialize(window, m_pDevice, m_pCommandQueue, m_pImguiDescriptorHeap, MAX_FRAMES_IN_FLIGHT);
-
-
-		m_loadingChunkMesh.reserve(2000);
 	}
 
 	void Renderer::shutdown()
@@ -94,6 +91,7 @@ namespace Okay
 
 		D3D12_RELEASE(m_pVoxelRootSignature);
 		D3D12_RELEASE(m_pVoxelPSO);
+		D3D12_RELEASE(m_pWaterPSO);
 		D3D12_RELEASE(m_pTextureSheet);
 
 		D3D12_RELEASE(m_pRTVDescHeap);
@@ -204,17 +202,20 @@ namespace Okay
 		frame.pCommandList->RSSetScissorRects(1, &frame.scissorRect);
 		frame.pCommandList->OMSetRenderTargets(1, &frame.cpuBackBufferRTV, false, &frame.cpuDepthTextureDSV);
 
-		for (const DXChunk& dxChunk : m_dxChunks)
+		for (DXChunk& dxChunk : m_dxChunks)
 		{
-			frame.pCommandList->IASetIndexBuffer(&dxChunk.indicesView);
-			frame.pCommandList->SetGraphicsRootShaderResourceView(2, dxChunk.vertexDataGVA);
-
 			GPUDrawCallData drawData = {};
 			drawData.chunkWorldPos = chunkCoordToWorldCoord(chunkIDToChunkCoord(dxChunk.chunkID));
-			D3D12_GPU_VIRTUAL_ADDRESS drawDataGVA = frame.ringBuffer.allocate(&drawData, sizeof(drawData));
-			frame.pCommandList->SetGraphicsRootConstantBufferView(1, drawDataGVA);
+			dxChunk.drawDataGVA = frame.ringBuffer.allocate(&drawData, sizeof(drawData));
 
-			frame.pCommandList->DrawIndexedInstanced(dxChunk.indicesCount, 1, 0, 0, 0);
+			drawGPUMeshInfo(dxChunk, dxChunk.blockGPUMeshInfo);
+		}
+
+		frame.pCommandList->SetPipelineState(m_pWaterPSO);
+
+		for (const DXChunk& dxChunk : m_dxChunks)
+		{
+			drawGPUMeshInfo(dxChunk, dxChunk.waterGPUMeshInfo);
 		}
 	}
 
@@ -231,6 +232,19 @@ namespace Okay
 		m_pSwapChain->Present(0, 0);
 
 		signal(frame.pFence, frame.fenceValue);
+	}
+
+	void Renderer::drawGPUMeshInfo(const DXChunk& dxChunk, const GPUMeshInfo& gpuMeshInfo)
+	{
+		if (gpuMeshInfo.indicesCount == 0)
+			return;
+
+		FrameResources& frame = getCurrentFrameResorces();
+
+		frame.pCommandList->IASetIndexBuffer(&gpuMeshInfo.indicesView);
+		frame.pCommandList->SetGraphicsRootShaderResourceView(2, gpuMeshInfo.vertexDataGVA);
+		frame.pCommandList->SetGraphicsRootConstantBufferView(1, dxChunk.drawDataGVA);
+		frame.pCommandList->DrawIndexedInstanced(gpuMeshInfo.indicesCount, 1, 0, 0, 0);
 	}
 
 	void Renderer::signal(ID3D12Fence* pFence, uint64_t& fenceValue)
@@ -339,11 +353,11 @@ namespace Okay
 		glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkID);
 		glm::ivec3 worldCoord = chunkCoordToWorldCoord(chunkCoord);
 
-		std::vector<uint32_t>& indices = outMeshData.indices;
-		std::vector<Vertex>& vertices = outMeshData.vertices;
+		outMeshData.blockMesh.vertices.reserve(MAX_BLOCKS_IN_CHUNK * 36ull);
+		outMeshData.blockMesh.indices.reserve(MAX_BLOCKS_IN_CHUNK * 36ull);
 
-		vertices.reserve(MAX_BLOCKS_IN_CHUNK * 36ull);
-		indices.reserve(MAX_BLOCKS_IN_CHUNK * 36ull);
+		outMeshData.waterMesh.vertices.reserve(MAX_BLOCKS_IN_CHUNK * 36ull / 2);
+		outMeshData.waterMesh.indices.reserve(MAX_BLOCKS_IN_CHUNK * 36ull / 2);
 
 		for (uint32_t i = 0; i < MAX_BLOCKS_IN_CHUNK; i++)
 		{
@@ -353,7 +367,8 @@ namespace Okay
 			if (chunkIterator == m_loadingChunkMesh.end())
 				return;
 
-			if (chunkIterator->second.latestChunkGenID != chunkGenID)
+			const ThreadSafeChunkMesh& threadChunk = chunkIterator->second;
+			if (threadChunk.latestChunkGenID != chunkGenID)
 				return;
 
 			lock.unlock();
@@ -366,93 +381,122 @@ namespace Okay
 			if (block == BlockType::AIR)
 				continue;
 
+
 			glm::ivec3 chunkBlockCoord = chunkBlockIdxToChunkBlockCoord(i);
 			glm::ivec3 worldBlockCoord = chunkBlockCoord + worldCoord;
 
-
-			// Top
-			if (pWorld->getBlockAtBlockCoord(worldBlockCoord + UP_DIR) == BlockType::AIR)
+			if (block == BlockType::WATER)
 			{
-				uint32_t textureId = getTextureID(block, BlockSide::TOP);
-
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 0));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 1), textureId, 0));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId, 0));
-
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId, 0));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId, 0));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 0));
+				addWaterMeshData(pWorld, chunkBlockCoord, worldBlockCoord, outMeshData.waterMesh);
 			}
-
-			// Bottom
-			if (pWorld->getBlockAtBlockCoord(worldBlockCoord - UP_DIR) == BlockType::AIR)
+			else
 			{
-				uint32_t textureId = getTextureID(block, BlockSide::BOTTOM);
-
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 1));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 0), textureId, 1));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), textureId, 1));
-
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), textureId, 1));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), textureId, 1));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 1));
+				addBlockMeshData(pWorld, block, chunkBlockCoord, worldBlockCoord, outMeshData.blockMesh);
 			}
+		}
+	}
 
-			// Right
-			if (pWorld->getBlockAtBlockCoord(worldBlockCoord + RIGHT_DIR) == BlockType::AIR)
-			{
-				uint32_t textureId = getTextureID(block, BlockSide::SIDE);
+	void Renderer::addBlockMeshData(const World* pWorld, BlockType block, const glm::ivec3& chunkBlockCoord, const glm::ivec3& worldBlockCoord, MeshData& outMeshData)
+	{
+		// Top
+		if (!pWorld->isBlockCoordSolid(worldBlockCoord + UP_DIR))
+		{
+			uint32_t textureId = getTextureID(block, BlockSide::TOP);
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId, 2));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(1, 0), textureId, 2));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 2));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 0));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 1), textureId, 0));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId, 0));
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId, 2));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 2));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), textureId, 2));
-			}
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId, 0));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId, 0));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 0));
+		}
 
-			// Left
-			if (pWorld->getBlockAtBlockCoord(worldBlockCoord - RIGHT_DIR) == BlockType::AIR)
-			{
-				uint32_t textureId = getTextureID(block, BlockSide::SIDE);
+		// Bottom
+		if (!pWorld->isBlockCoordSolid(worldBlockCoord - UP_DIR))
+		{
+			uint32_t textureId = getTextureID(block, BlockSide::BOTTOM);
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), textureId, 3));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(0, 0), textureId, 3));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 3));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 1));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 0), textureId, 1));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), textureId, 1));
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(1, 1), textureId, 3));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), textureId, 3));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 3));
-			}
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), textureId, 1));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), textureId, 1));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 1));
+		}
 
-			// Forward
-			if (pWorld->getBlockAtBlockCoord(worldBlockCoord + FORWARD_DIR) == BlockType::AIR)
-			{
-				uint32_t textureId = getTextureID(block, BlockSide::SIDE);
+		// Right
+		if (!pWorld->isBlockCoordSolid(worldBlockCoord + RIGHT_DIR))
+		{
+			uint32_t textureId = getTextureID(block, BlockSide::SIDE);
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), textureId, 4));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 0), textureId, 4));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), textureId, 4));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId, 2));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(1, 0), textureId, 2));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 2));
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), textureId, 4));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(0, 1), textureId, 4));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), textureId, 4));
-			}
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId, 2));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 2));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), textureId, 2));
+		}
 
-			// Backward
-			if (pWorld->getBlockAtBlockCoord(worldBlockCoord - FORWARD_DIR) == BlockType::AIR)
-			{
-				uint32_t textureId = getTextureID(block, BlockSide::SIDE);
+		// Left
+		if (!pWorld->isBlockCoordSolid(worldBlockCoord - RIGHT_DIR))
+		{
+			uint32_t textureId = getTextureID(block, BlockSide::SIDE);
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), textureId, 5));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(0, 0), textureId, 5));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), textureId, 5));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), textureId, 3));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(0, 0), textureId, 3));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 3));
 
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), textureId, 5));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(1, 1), textureId, 5));
-				addVertex(indices, vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), textureId, 5));
-			}
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(1, 1), textureId, 3));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), textureId, 3));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 3));
+		}
+
+		// Forward
+		if (!pWorld->isBlockCoordSolid(worldBlockCoord + FORWARD_DIR))
+		{
+			uint32_t textureId = getTextureID(block, BlockSide::SIDE);
+
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), textureId, 4));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 0), textureId, 4));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), textureId, 4));
+
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), textureId, 4));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(0, 1), textureId, 4));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), textureId, 4));
+		}
+
+		// Backward
+		if (!pWorld->isBlockCoordSolid(worldBlockCoord - FORWARD_DIR))
+		{
+			uint32_t textureId = getTextureID(block, BlockSide::SIDE);
+
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), textureId, 5));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(0, 0), textureId, 5));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), textureId, 5));
+
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), textureId, 5));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(1, 1), textureId, 5));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), textureId, 5));
+		}
+	}
+
+	void Renderer::addWaterMeshData(const World* pWorld, const glm::ivec3& chunkBlockCoord, const glm::ivec3& worldBlockCoord, MeshData& outMeshData)
+	{
+		// Top
+		if (pWorld->getBlockAtBlockCoord(worldBlockCoord + UP_DIR) != BlockType::WATER)
+		{
+			uint32_t textureId = getTextureID(BlockType::WATER, BlockSide::SIDE);
+
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 1), textureId));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId));
+
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId));
+			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId));
 		}
 	}
 
@@ -504,7 +548,7 @@ namespace Okay
 					chunkMesh.latestChunkGenID = 0;
 					chunkGenID = 0;
 					chunkMesh.meshGenerated.store(false);
-				}
+				}	
 
 				const World* pWorld = &world;
 				ThreadPool::queueJob([=]()
@@ -558,7 +602,11 @@ namespace Okay
 			}
 
 			findAndDeleteDXChunk(chunkID);
-			writeChunkDataToGPU(chunkID, threadChunk.meshData);
+
+			DXChunk& dxChunk = m_dxChunks.emplace_back();
+			dxChunk.chunkID = chunkID;
+			writeMeshData(dxChunk.blockGPUMeshInfo, threadChunk.meshData.blockMesh);
+			writeMeshData(dxChunk.waterGPUMeshInfo, threadChunk.meshData.waterMesh);
 
 			chunkIterator = m_loadingChunkMesh.erase(chunkIterator);
 		}
@@ -569,31 +617,32 @@ namespace Okay
 			transitionResource(frame.pCommandList, m_gpuIndicesData.getDXResource(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDEX_BUFFER);
 
 			// Need to re-get the GVAs incase the arenas had to resize
+			D3D12_GPU_VIRTUAL_ADDRESS verticesGVA = m_gpuVertexData.getDXResource()->GetGPUVirtualAddress();
+			D3D12_GPU_VIRTUAL_ADDRESS indicesGVA = m_gpuIndicesData.getDXResource()->GetGPUVirtualAddress();
 			for (DXChunk& dxChunk : m_dxChunks)
 			{
-				dxChunk.vertexDataGVA = m_gpuVertexData.getDXResource()->GetGPUVirtualAddress() + dxChunk.vertexDataSlot.offset;
-				dxChunk.indicesView.BufferLocation = m_gpuIndicesData.getDXResource()->GetGPUVirtualAddress() + dxChunk.indicesDataSlot.offset;
+				dxChunk.blockGPUMeshInfo.vertexDataGVA = verticesGVA + dxChunk.blockGPUMeshInfo.vertexDataSlot.offset;
+				dxChunk.blockGPUMeshInfo.indicesView.BufferLocation = indicesGVA + dxChunk.blockGPUMeshInfo.indicesDataSlot.offset;
+
+				dxChunk.waterGPUMeshInfo.vertexDataGVA = verticesGVA + dxChunk.waterGPUMeshInfo.vertexDataSlot.offset;
+				dxChunk.waterGPUMeshInfo.indicesView.BufferLocation = indicesGVA + dxChunk.waterGPUMeshInfo.indicesDataSlot.offset;
 			}
 		}
 	}
 
-	void Renderer::writeChunkDataToGPU(ChunkID chunkID, const ChunkMeshData& chunkMesh)
+	void Renderer::writeMeshData(GPUMeshInfo& gpuMeshInfo, const MeshData& meshData)
 	{
-		FrameResources& frame = getCurrentFrameResorces();
+		uint64_t vertexDataSize = meshData.vertices.size() * sizeof(Vertex);
+		uint64_t indexDataSize = meshData.indices.size() * sizeof(uint32_t);
 
-		uint64_t vertexDataSize = chunkMesh.vertices.size() * sizeof(Vertex);
-		uint64_t indexDataSize = chunkMesh.indices.size() * sizeof(uint32_t);
+		gpuMeshInfo.vertexDataGVA = allocateIntoResourceArena(m_gpuVertexData, &gpuMeshInfo.vertexDataSlot, meshData.vertices.data(), vertexDataSize);
+		gpuMeshInfo.indicesCount = (uint32_t)meshData.indices.size();
+		gpuMeshInfo.indicesView.BufferLocation = allocateIntoResourceArena(m_gpuIndicesData, &gpuMeshInfo.indicesDataSlot, meshData.indices.data(), indexDataSize);
+		gpuMeshInfo.indicesView.Format = DXGI_FORMAT_R32_UINT;
+		gpuMeshInfo.indicesView.SizeInBytes = (uint32_t)indexDataSize;
 
-		DXChunk& dxChunk = m_dxChunks.emplace_back();
-		dxChunk.chunkID = chunkID;
-		dxChunk.vertexDataGVA = allocateIntoResourceArena(m_gpuVertexData, &dxChunk.vertexDataSlot, chunkMesh.vertices.data(), vertexDataSize);
-		dxChunk.indicesCount = (uint32_t)chunkMesh.indices.size();
-		dxChunk.indicesView.BufferLocation = allocateIntoResourceArena(m_gpuIndicesData, &dxChunk.indicesDataSlot, chunkMesh.indices.data(), indexDataSize);
-		dxChunk.indicesView.Format = DXGI_FORMAT_R32_UINT;
-		dxChunk.indicesView.SizeInBytes = (uint32_t)indexDataSize;
-
-		updateDefaultHeapResource(m_gpuVertexData.getDXResource(), dxChunk.vertexDataSlot.offset, chunkMesh.vertices.data(), vertexDataSize);
-		updateDefaultHeapResource(m_gpuIndicesData.getDXResource(), dxChunk.indicesDataSlot.offset, chunkMesh.indices.data(), indexDataSize);
+		updateDefaultHeapResource(m_gpuVertexData.getDXResource(), gpuMeshInfo.vertexDataSlot.offset, meshData.vertices.data(), vertexDataSize);
+		updateDefaultHeapResource(m_gpuIndicesData.getDXResource(), gpuMeshInfo.indicesDataSlot.offset, meshData.indices.data(), indexDataSize);
 	}
 
 	void Renderer::findAndDeleteDXChunk(ChunkID chunkID)
@@ -603,8 +652,12 @@ namespace Okay
 			if (m_dxChunks[i].chunkID != chunkID)
 				continue;
 
-			m_gpuVertexData.removeAllocation(m_dxChunks[i].vertexDataSlot);
-			m_gpuIndicesData.removeAllocation(m_dxChunks[i].indicesDataSlot);
+			m_gpuVertexData.removeAllocation(m_dxChunks[i].blockGPUMeshInfo.vertexDataSlot);
+			m_gpuIndicesData.removeAllocation(m_dxChunks[i].blockGPUMeshInfo.indicesDataSlot);
+
+			m_gpuVertexData.removeAllocation(m_dxChunks[i].waterGPUMeshInfo.vertexDataSlot);
+			m_gpuIndicesData.removeAllocation(m_dxChunks[i].waterGPUMeshInfo.indicesDataSlot);
+
 			m_dxChunks.erase(m_dxChunks.begin() + i);
 			break;
 		}
@@ -967,14 +1020,13 @@ namespace Okay
 		uint8_t* pMappedBuffer = frame.ringBuffer.map();
 
 		// Copy source texture data into ringBuffer, taking padding into consideration
-		for (const auto& textureInfo : textureIds)
+ 		for (const auto& textureInfo : textureIds)
 		{
 			const std::string& textureName = textureInfo.first;
 			uint32_t textureId = textureInfo.second;
 
 			uint32_t xSlot = textureId % numXTiles;
-			uint32_t ySlot = textureId / numYTiles;
-
+			uint32_t ySlot = textureId / numXTiles;
 
 			uint8_t* pTarget = pMappedBuffer +
 				xSlot * (tileSize + padding) * 4 +
@@ -1254,6 +1306,23 @@ namespace Okay
 
 		DX_CHECK(m_pDevice->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_pVoxelPSO)));
 
+		for (ID3DBlob*& pBlob : pShaderBlobs)
+			D3D12_RELEASE(pBlob);
+
+		
+		pipelineDesc.BlendState.RenderTarget[0].BlendEnable = TRUE;
+		pipelineDesc.BlendState.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+		pipelineDesc.BlendState.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+		pipelineDesc.BlendState.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+		pipelineDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+		
+		pipelineDesc.VS = compileShader(SHADER_PATH / "WaterVertexShader.hlsl", "vs_5_1", &pShaderBlobs[shaderBlobIdx++]);
+		pipelineDesc.PS = compileShader(SHADER_PATH / "WaterPixelShader.hlsl", "ps_5_1", &pShaderBlobs[shaderBlobIdx++]);
+		pipelineDesc.NumRenderTargets = 1;
+		pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+		pipelineDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+
+		DX_CHECK(m_pDevice->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_pWaterPSO)));
 
 		for (ID3DBlob*& pBlob : pShaderBlobs)
 			D3D12_RELEASE(pBlob);

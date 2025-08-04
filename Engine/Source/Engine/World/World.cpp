@@ -15,6 +15,12 @@ namespace Okay
 	World::World()
 	{
 		m_camera.farZ = (RENDER_DISTNACE + 2) * CHUNK_WIDTH;
+
+		m_worldGenData.noiseInterpolation.addPoint(-0.45f, -0.55f);
+		m_worldGenData.noiseInterpolation.addPoint(-0.1f, 0.f);
+		m_worldGenData.noiseInterpolation.addPoint(0.f, 0.1f);
+		m_worldGenData.noiseInterpolation.addPoint(0.275f, 0.15f);
+		m_worldGenData.noiseInterpolation.addPoint(0.65f, 0.525f);
 	}
 
 	World::~World()
@@ -50,6 +56,18 @@ namespace Okay
 		std::shared_lock lock(mutis);
 		const Chunk* pChunk = tryGetChunk(chunkID);
 		return pChunk ? pChunk->blocks[blockIdx] : BlockType::INVALID;
+	}
+
+	bool World::isBlockCoordSolid(const glm::ivec3& blockCoord) const
+	{
+		if (blockCoord.y < 0 || blockCoord.y >= WORLD_HEIGHT)
+			return false;
+
+		glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(blockCoord);
+		uint32_t chunkBlockIdx = chunkBlockCoordToChunkBlockIdx(chunkBlockCoord);
+
+		BlockType block = tryGetBlock(blockCoordToChunkID(blockCoord), chunkBlockIdx);
+		return block != BlockType::AIR && block != BlockType::WATER;
 	}
 
 	Camera& World::getCamera()
@@ -225,6 +243,11 @@ namespace Okay
 				for (int y = stoneHeight; y < columnHeight; y++)
 				{
 					chunk.blocks[chunkBlockCoordToChunkBlockIdx({ x, y, z })] = y < columnHeight - 1 ? BlockType::DIRT : BlockType::GRASS;
+				}
+
+				for (int y = columnHeight; y < (int)m_worldGenData.oceanHeight; y++)
+				{
+					chunk.blocks[chunkBlockCoordToChunkBlockIdx({ x, y, z })] = BlockType::WATER;
 				}
 			}
 		}
