@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Chunk.h"
-#include "Camera.h"
 #include "Engine/Utilities/InterpolationList.h"
 
 #include <atomic>
@@ -30,13 +29,16 @@ namespace Okay
 		InterpolationList noiseInterpolation = InterpolationList({ -1.f, -1.f }, { 1.f, 1.f });
 	};
 
+	class Window;
+	struct Camera;
+
 	class World
 	{
 	public:
 		World();
-		~World();
+		~World() = default;
 
-		void update();
+		void update(const Camera& camera);
 
 		BlockType getBlockAtBlockCoord(const glm::ivec3& blockCoord) const;
 		BlockType tryGetBlock(ChunkID chunkID, uint32_t blockIdx) const;
@@ -51,10 +53,7 @@ namespace Okay
 		const std::vector<ChunkID>& getAddedChunks() const;
 		const std::vector<ChunkID>& getRemovedChunks() const;
 
-		Camera& getCamera();
-		const Camera& getCameraConst() const;
-
-		void reloadWorld();
+		void resetWorld();
 		WorldGenerationData m_worldGenData;
 
 	private:
@@ -64,14 +63,16 @@ namespace Okay
 		void clearUpdatedChunks();
 		void unloadDistantChunks();
 		void processLoadingChunks();
-		void tryLoadRenderEligableChunks();
+		void tryLoadRenderEligableChunks(const Camera& camera);
 
 		bool isChunkWithinRenderDistance(ChunkID chunkID) const;
 		bool isChunkLoading(ChunkID chunkID) const;
 
+		bool isChunkInView(const Camera& camera, ChunkID chunkID) const;
+
 	private:
-		Camera m_camera;
 		glm::ivec2 m_currentCamChunkCoord = glm::ivec2(0, 0);
+		float m_aspectRatio = 0.f;
 
 		std::unordered_map<ChunkID, Chunk> m_loadedChunks;
 		std::unordered_map<ChunkID, ChunkGeneration> m_loadingChunks;

@@ -13,6 +13,7 @@ namespace Okay
 	class Window;
 	class World;
 	struct Chunk;
+	struct Camera;
 
 	struct FrameResources
 	{
@@ -161,10 +162,10 @@ namespace Okay
 		void onResize(uint32_t width, uint32_t height);
 		void unloadChunks();
 
-		void render(const World& world);
+		void render(const World& world, const Camera& camera);
 
 	private:
-		void updateBuffers(const World& world);
+		void updateBuffers(const World& world, const Camera& camera);
 		void preRender();
 		void renderWorld();
 		void postRender();

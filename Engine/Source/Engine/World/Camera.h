@@ -1,21 +1,25 @@
 #pragma once
 
 #include "Transform.h"
+#include "Engine/Utilities/Collision.h"
+#include "Engine/Okay.h"
 
 namespace Okay
 {
 	struct Camera
 	{
 		Transform transform = {};
+		Collision::Frustum frustum = {};
+
 		float fov = 90.f;
-		float speed = 5.f;
+		glm::vec2 viewportDims = glm::vec2(0.f);
 
 		float nearZ = 0.1f;
 		float farZ = 1000.f;
 
-		inline glm::mat4 getProjectionMatrix(float width, float height) const
+		inline glm::mat4 getProjectionMatrix() const
 		{
-			return glm::perspectiveFovLH_ZO(glm::radians(fov), width, height, nearZ, farZ);
+			return glm::perspectiveFovLH_ZO(glm::radians(fov), viewportDims.x, viewportDims.y, nearZ, farZ);
 		}
 	};
 }

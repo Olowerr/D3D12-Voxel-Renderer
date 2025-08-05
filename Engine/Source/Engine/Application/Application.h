@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Window.h"
+#include "Engine/World/Camera.h"
 #include "Engine/D3D12/Renderer.h"
 #include "Time.h"
 #include "Engine/World/World.h"
@@ -20,6 +21,7 @@ namespace Okay
 
 	protected:
 		Window m_window;
+		Camera m_camera;
 		World m_world;
 		Renderer m_renderer;
 

@@ -1,7 +1,9 @@
 #include "World.h"
-#include "../Application/Time.h"
-#include "../Application/Input.h"
+#include "Engine/Application/Time.h"
+#include "Engine/Application/Input.h"
 #include "Engine/Utilities/ThreadPool.h"
+#include "Engine/Application/Window.h"
+#include "Camera.h"
 
 #include "sivPerlinNoise/PerlinNoise.hpp"
 
@@ -14,8 +16,6 @@ namespace Okay
 
 	World::World()
 	{
-		m_camera.farZ = (RENDER_DISTNACE + 2) * CHUNK_WIDTH;
-
 		m_worldGenData.noiseInterpolation.addPoint(-0.45f, -0.55f);
 		m_worldGenData.noiseInterpolation.addPoint(-0.1f, 0.f);
 		m_worldGenData.noiseInterpolation.addPoint(0.f, 0.1f);
@@ -23,19 +23,15 @@ namespace Okay
 		m_worldGenData.noiseInterpolation.addPoint(0.65f, 0.525f);
 	}
 
-	World::~World()
-	{
-	}
-
-	void World::update()
+	void World::update(const Camera& camera)
 	{
 		clearUpdatedChunks();
-		m_currentCamChunkCoord = chunkIDToChunkCoord(blockCoordToChunkID(m_camera.transform.position));
+		m_currentCamChunkCoord = chunkIDToChunkCoord(blockCoordToChunkID(camera.transform.position));
 
 		std::unique_lock lock(mutis);
 		unloadDistantChunks();
 		processLoadingChunks();
-		tryLoadRenderEligableChunks();
+		tryLoadRenderEligableChunks(camera);
 	}
 
 	BlockType World::getBlockAtBlockCoord(const glm::ivec3& blockCoord) const
@@ -70,17 +66,7 @@ namespace Okay
 		return block != BlockType::AIR && block != BlockType::WATER;
 	}
 
-	Camera& World::getCamera()
-	{
-		return m_camera;
-	}
-
-	const Camera& World::getCameraConst() const
-	{
-		return m_camera;
-	}
-
-	void World::reloadWorld()
+	void World::resetWorld()
 	{
 		std::unique_lock lock(mutis);
 
@@ -165,7 +151,7 @@ namespace Okay
 		}
 	}
 
-	void World::tryLoadRenderEligableChunks()
+	void World::tryLoadRenderEligableChunks(const Camera& camera)
 	{
 		for (int i = 0; i < RENDER_DISTNACE; i++)
 		{
@@ -178,8 +164,16 @@ namespace Okay
 					glm::ivec2 chunkCoord = m_currentCamChunkCoord + glm::ivec2(chunkX, chunkZ);
 					ChunkID chunkID = chunkCoordToChunkID(chunkCoord);
 
-					if (isChunkLoaded(chunkID) || isChunkLoading(chunkID) || !isChunkWithinRenderDistance(chunkID))
+					if (isChunkLoaded(chunkID))
 						continue;
+
+					if (!isChunkWithinRenderDistance(chunkID) || !isChunkInView(camera, chunkID))
+					{
+						if (isChunkLoading(chunkID))
+							m_loadingChunks[chunkID].cancel.store(true);
+
+						continue;
+					}
 
 					launchChunkGenerationThread(chunkID);
 				}
@@ -197,6 +191,16 @@ namespace Okay
 	bool World::isChunkLoading(ChunkID chunkID) const
 	{
 		return m_loadingChunks.contains(chunkID);
+	}
+
+	bool World::isChunkInView(const Camera& camera, ChunkID chunkID) const
+	{
+		glm::vec3 chunkExtents = glm::vec3(CHUNK_WIDTH, WORLD_HEIGHT, CHUNK_WIDTH) * 0.5f;
+		glm::vec3 chunkCenter = chunkCoordToWorldCoord(chunkIDToChunkCoord(chunkID));
+		chunkCenter += chunkExtents;
+
+		Collision::AABB chunkBox = Collision::createAABB(chunkCenter, chunkExtents);
+		return Collision::frustumAABB(camera.frustum, chunkBox);
 	}
 
 	const std::vector<ChunkID>& World::getAddedChunks() const

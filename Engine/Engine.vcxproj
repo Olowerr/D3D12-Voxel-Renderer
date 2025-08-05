@@ -40,6 +40,7 @@
     <ClInclude Include="Source\Engine\D3D12\ResourceArena.h" />
     <ClInclude Include="Source\Engine\D3D12\RingBuffer.h" />
     <ClInclude Include="Source\Engine\Okay.h" />
+    <ClInclude Include="Source\Engine\Utilities\Collision.h" />
     <ClInclude Include="Source\Engine\Utilities\ThreadPool.h" />
     <ClInclude Include="Source\Engine\Utilities\InterpolationList.h" />
     <ClInclude Include="Source\Engine\World\Blocks.h" />
@@ -66,6 +67,7 @@
     <ClCompile Include="Source\Engine\D3D12\Renderer.cpp" />
     <ClCompile Include="Source\Engine\D3D12\ResourceArena.cpp" />
     <ClCompile Include="Source\Engine\D3D12\RingBuffer.cpp" />
+    <ClCompile Include="Source\Engine\Utilities\Collision.cpp" />
     <ClCompile Include="Source\Engine\Utilities\InterpolationList.cpp" />
     <ClCompile Include="Source\Engine\Utilities\ThreadPool.cpp" />
     <ClCompile Include="Source\Engine\World\Blocks.cpp" />

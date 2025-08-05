@@ -15,6 +15,14 @@ namespace Okay
 
 		m_window.initiate(windowTitle, windowWidth, windowHeight);
 		m_renderer.initialize(m_window);
+
+		m_camera.viewportDims = m_window.getWindowSize();
+		m_window.registerResizeCallback([&](uint32_t width, uint32_t height)
+			{
+				m_camera.viewportDims.x = (float)width;
+				m_camera.viewportDims.y = (float)height;
+			});
+		m_camera.fov = 30.f;
 	}
 
 	Application::~Application()
@@ -36,10 +44,11 @@ namespace Okay
 			m_window.processMessages();
 			imguiNewFrame();
 
-			m_world.update();
 			onUpdate(timeStep);
+			m_camera.frustum = Collision::createFrustumFromCamera(m_camera);
 
-			m_renderer.render(m_world);
+			m_world.update(m_camera);
+			m_renderer.render(m_world, m_camera);
 		}
 	}
 }

@@ -34,7 +34,7 @@ void App::onUpdate(TimeStep dt)
 		windowTitle = "D3D12 Voxel Renderer | Fps: " + std::to_string((uint32_t)glm::round(1.f / averageFps));
 		m_window.setWindowTitle(windowTitle);
 
-		glm::vec3 camPos = m_world.getCamera().transform.position;
+		glm::vec3 camPos = m_camera.transform.position;
 		glm::ivec2 chunkCoord = chunkIDToChunkCoord(blockCoordToChunkID(camPos));
 
 		//printf("(%d, %d) | (%.1f, %.1f, %.1f)\n", chunkCoord.x, chunkCoord.y, camPos.x, camPos.y, camPos.z);
@@ -52,9 +52,6 @@ void App::updateCamera(TimeStep dt)
 	if (Input::getMouseMode() == MouseMode::FREE)
 		return;
 
-	Camera& camera = m_world.getCamera();
-	Transform& camTransform = camera.transform;
-
 	float camMoveSpeed = Input::isKeyDown(Key::L_SHIFT) ? 50.f : 16.f;
 	float camRotSpeed = 0.1f;
 
@@ -67,11 +64,11 @@ void App::updateCamera(TimeStep dt)
 
 	if (forwardDir)
 	{
-		moveDir += camTransform.forwardVec() * forwardDir;
+		moveDir += m_camera.transform.forwardVec() * forwardDir;
 	}
 	if (rightDir)
 	{
-		moveDir += camTransform.rightVec() * rightDir;
+		moveDir += m_camera.transform.rightVec() * rightDir;
 	}
 	if (upDir)
 	{
@@ -80,18 +77,18 @@ void App::updateCamera(TimeStep dt)
 
 	if (forwardDir || rightDir || upDir)
 	{
-		camTransform.position += glm::normalize(moveDir) * camMoveSpeed * dt;
+		m_camera.transform.position += glm::normalize(moveDir) * camMoveSpeed * dt;
 	}
 
 
 	// Rotation
 	glm::vec2 mouseDelta = Input::getMouseDelta();
-	camTransform.rotation.y += mouseDelta.x * camRotSpeed;
-	camTransform.rotation.x += mouseDelta.y * camRotSpeed;
+	m_camera.transform.rotation.y += mouseDelta.x * camRotSpeed;
+	m_camera.transform.rotation.x += mouseDelta.y * camRotSpeed;
 
 
 	// Zoom
-	camera.fov = glm::clamp(camera.fov - Input::getScrollDelta(), 5.f, 90.f);
+	m_camera.fov = glm::clamp(m_camera.fov - Input::getScrollDelta(), 5.f, 90.f);
 }
 
 void App::handleImgui()
@@ -104,7 +101,7 @@ void App::handleImgui()
 
 	if (ImGui::Button("Reload World"))
 	{
-		m_world.reloadWorld();
+		m_world.resetWorld();
 		m_renderer.unloadChunks();
 	}
 
@@ -122,8 +119,6 @@ void App::handleImgui()
 
 	if (ImPlot::BeginPlot("Test"))
 	{
-		ImPlotAxisFlags axisFlags = ImPlotAxisFlags_Lock;
-		ImPlot::SetupAxes(nullptr, nullptr, axisFlags, axisFlags);
 		ImPlot::SetupAxesLimits(-1.2, 1.2, -1.2, 1.2);
 
 		InterpolationList& noiseInterpolation = worldGenData.noiseInterpolation;

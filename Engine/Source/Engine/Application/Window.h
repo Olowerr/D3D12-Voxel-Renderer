@@ -30,6 +30,8 @@ namespace Okay
 		void setWindowTitle(std::string_view newTitle);
 		void registerResizeCallback(std::function<void(uint32_t, uint32_t)> callback);
 
+		glm::uvec2 getWindowSize() const;
+
 	private:
 		void setInputMode(MouseMode mode);
 		MouseMode getInputMode();

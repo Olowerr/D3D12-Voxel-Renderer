@@ -3,6 +3,7 @@
 #include "Engine/World/World.h"
 #include "Engine/Utilities/ThreadPool.h"
 #include "Engine/Application/ImguiHelper.h"
+#include "Engine/World/Camera.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
@@ -141,7 +142,7 @@ namespace Okay
 		m_loadingChunkMesh.clear();
 	}
 
-	void Renderer::render(const World& world)
+	void Renderer::render(const World& world, const Camera& camera)
 	{
 		FrameResources& frame = getCurrentFrameResorces();
 		wait(frame.pFence, frame.fenceValue);
@@ -152,7 +153,7 @@ namespace Okay
 		frame.ringBuffer.jumpToStart();
 		frame.ringBuffer.map();
 
-		updateBuffers(world);
+		updateBuffers(world, camera);
 		preRender();
 		renderWorld();
 		postRender();
@@ -160,13 +161,12 @@ namespace Okay
 		frame.ringBuffer.unmap();
 	}
 
-	void Renderer::updateBuffers(const World& world)
+	void Renderer::updateBuffers(const World& world, const Camera& camera)
 	{
 		FrameResources& frame = getCurrentFrameResorces();
-		const Camera& camera = world.getCameraConst();
 
 		GPURenderData renderData = {};
-		renderData.viewProjMatrix = glm::transpose(camera.getProjectionMatrix(frame.viewport.Width, frame.viewport.Height) * camera.transform.getViewMatrix());
+		renderData.viewProjMatrix = glm::transpose(camera.getProjectionMatrix() * camera.transform.getViewMatrix());
 		renderData.textureSheetTileSize = TEXTURE_SHEET_TILE_SIZE;
 		renderData.textureSheetPadding = TEXTURE_SHEET_PADDING;
 

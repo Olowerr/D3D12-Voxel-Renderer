@@ -115,6 +115,13 @@ namespace Okay
 		m_resizeCallbacks.emplace_back(callback);
 	}
 
+	glm::uvec2 Window::getWindowSize() const
+	{
+		glm::uvec2 size = glm::uvec2(0);
+		glfwGetWindowSize(m_pGlfwWindow, (int*)&size.x, (int*)&size.y);
+		return size;
+	}
+
 	void Window::setInputMode(MouseMode mode)
 	{
 		// For now mouse mode should not be changed to anything but these
