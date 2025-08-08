@@ -5,11 +5,6 @@
 
 namespace Okay
 {
-	Window::~Window()
-	{
-		shutdown();
-	}
-
 	void Window::initiate(std::string_view windowTitle, uint32_t windowWidth, uint32_t windowHeight)
 	{
 		m_pGlfwWindow = glfwCreateWindow((int)windowWidth, (int)windowHeight, windowTitle.data(), nullptr, nullptr);

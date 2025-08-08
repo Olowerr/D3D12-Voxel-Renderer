@@ -16,7 +16,7 @@ namespace Okay
 		friend class Input;
 
 		Window() = default;
-		virtual ~Window();
+		~Window() = default;
 
 		void initiate(std::string_view windowTitle, uint32_t windowWidth, uint32_t windowHeight);
 		void shutdown();

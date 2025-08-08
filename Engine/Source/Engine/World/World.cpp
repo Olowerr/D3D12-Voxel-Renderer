@@ -167,9 +167,10 @@ namespace Okay
 					if (isChunkLoaded(chunkID))
 						continue;
 
-					if (!isChunkWithinRenderDistance(chunkID) || !isChunkInView(camera, chunkID))
+					bool loading = isChunkLoading(chunkID);
+					if (loading || !isChunkWithinRenderDistance(chunkID) || !isChunkInView(camera, chunkID))
 					{
-						if (isChunkLoading(chunkID))
+						if (loading)
 							m_loadingChunks[chunkID].cancel.store(true);
 
 						continue;

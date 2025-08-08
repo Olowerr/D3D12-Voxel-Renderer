@@ -5,7 +5,7 @@ namespace Okay
 	void RingBuffer::initialize(ID3D12Device* pDevice, uint64_t size)
 	{
 		m_pDevice = pDevice;
-		resize(size);
+		createBuffer(alignUint64(size, D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT));
 	}
 	
 	void RingBuffer::shutdown()

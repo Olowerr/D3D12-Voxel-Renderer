@@ -22,7 +22,6 @@ namespace Okay
 				m_camera.viewportDims.x = (float)width;
 				m_camera.viewportDims.y = (float)height;
 			});
-		m_camera.fov = 30.f;
 	}
 
 	Application::~Application()
@@ -30,6 +29,7 @@ namespace Okay
 		m_window.shutdown();
 		m_renderer.shutdown();
 		ThreadPool::shutdown();
+		glfwTerminate();
 	}
 
 	void Application::run()

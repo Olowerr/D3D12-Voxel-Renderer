@@ -117,6 +117,7 @@ namespace Okay
 			frame.pCommandList->ClearState(nullptr);
 
 			execute(frame.pCommandList);
+			signal(frame.pFence, frame.fenceValue);
 			wait(frame.pFence, frame.fenceValue);
 
 			// Release all direct backBuffer references
@@ -632,6 +633,12 @@ namespace Okay
 
 	void Renderer::writeMeshData(GPUMeshInfo& gpuMeshInfo, const MeshData& meshData)
 	{
+		if (!meshData.vertices.size())
+		{
+			gpuMeshInfo.indicesCount = 0;
+			return;
+		}
+
 		uint64_t vertexDataSize = meshData.vertices.size() * sizeof(Vertex);
 		uint64_t indexDataSize = meshData.indices.size() * sizeof(uint32_t);
 

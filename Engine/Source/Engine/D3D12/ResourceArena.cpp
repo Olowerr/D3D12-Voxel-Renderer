@@ -85,6 +85,9 @@ namespace Okay
 
 	void ResourceArena::removeAllocation(const ResourceSlot& removedSlot)
 	{
+		if (removedSlot.offset == INVALID_UINT64 || removedSlot.offset == INVALID_UINT64)
+			return;
+
 		// Search for slot we can merge with
 		uint64_t removedSlotEnd = removedSlot.offset + removedSlot.size;
 		for (uint64_t i = 0; i < m_slots.size(); i++)
