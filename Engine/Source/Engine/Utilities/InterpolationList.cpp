@@ -58,6 +58,8 @@ namespace Okay
 			}
 		}
 
+		if (index == INVALID_UINT64)
+			printf("%.3f\n", position);
 		OKAY_ASSERT(index != INVALID_UINT64);
 		return index;
 	}

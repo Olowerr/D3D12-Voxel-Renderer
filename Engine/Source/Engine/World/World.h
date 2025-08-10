@@ -44,6 +44,8 @@ namespace Okay
 		BlockType tryGetBlock(ChunkID chunkID, uint32_t blockIdx) const;
 		bool isBlockCoordSolid(const glm::ivec3& blockCoord) const;
 
+		BlockType generateBlock(const glm::ivec3& blockCoord);
+
 		Chunk& getChunk(ChunkID chunkID);
 		const Chunk& getChunkConst(ChunkID chunkID) const;
 
@@ -53,6 +55,7 @@ namespace Okay
 		const std::vector<ChunkID>& getAddedChunks() const;
 		const std::vector<ChunkID>& getRemovedChunks() const;
 
+		void applySeed() const;
 		void resetWorld();
 		WorldGenerationData m_worldGenData;
 

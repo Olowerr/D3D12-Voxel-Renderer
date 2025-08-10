@@ -5,9 +5,10 @@
 #include "Engine/Application/Window.h"
 #include "Camera.h"
 
-#include "sivPerlinNoise/PerlinNoise.hpp"
-
 #include <shared_mutex>
+
+#define DB_PERLIN_IMPL
+#include "db_perlin/db_perlin.hpp"
 
 namespace Okay
 {
@@ -21,6 +22,8 @@ namespace Okay
 		m_worldGenData.noiseInterpolation.addPoint(0.f, 0.1f);
 		m_worldGenData.noiseInterpolation.addPoint(0.275f, 0.15f);
 		m_worldGenData.noiseInterpolation.addPoint(0.65f, 0.525f);
+
+		applySeed();
 	}
 
 	void World::update(const Camera& camera)
@@ -64,6 +67,34 @@ namespace Okay
 
 		BlockType block = tryGetBlock(blockCoordToChunkID(blockCoord), chunkBlockIdx);
 		return block != BlockType::AIR && block != BlockType::WATER;
+	}
+
+	BlockType World::generateBlock(const glm::ivec3& blockCoord)
+	{
+		float noise = db::perlin_octave2D(blockCoord.x * m_worldGenData.frequency, blockCoord.z * m_worldGenData.frequency, m_worldGenData.octaves, m_worldGenData.persistance);
+		noise = m_worldGenData.noiseInterpolation.sample(noise);
+
+		int columnHeight = int(noise * m_worldGenData.amplitude + m_worldGenData.oceanHeight);
+		columnHeight = glm::clamp(columnHeight, 1, (int)WORLD_HEIGHT);
+
+		int grassDepth = 4;
+		int stoneHeight = (int)glm::max((int)columnHeight - (int)grassDepth, 0);
+
+		if (blockCoord.y < stoneHeight)
+			return BlockType::STONE;
+
+		if (blockCoord.y >= stoneHeight && blockCoord.y < columnHeight)
+			return blockCoord.y < columnHeight - 1 ? BlockType::DIRT : BlockType::GRASS;
+
+		if (blockCoord.y >= columnHeight && blockCoord.y < (int)m_worldGenData.oceanHeight)
+			return BlockType::WATER;
+	
+		return BlockType::AIR;
+	}
+
+	void World::applySeed() const
+	{
+		db::reseed(m_worldGenData.seed);
 	}
 
 	void World::resetWorld()
@@ -167,14 +198,17 @@ namespace Okay
 					if (isChunkLoaded(chunkID))
 						continue;
 
-					bool loading = isChunkLoading(chunkID);
-					if (loading || !isChunkWithinRenderDistance(chunkID) || !isChunkInView(camera, chunkID))
+					if (!isChunkWithinRenderDistance(chunkID) || !isChunkInView(camera, chunkID))
 					{
-						if (loading)
+						auto chunkIt = m_loadingChunks.find(chunkID);
+						if (chunkIt != m_loadingChunks.end()) // Chunk is loading
 							m_loadingChunks[chunkID].cancel.store(true);
 
 						continue;
 					}
+
+					if (isChunkLoading(chunkID))
+						continue;
 
 					launchChunkGenerationThread(chunkID);
 				}
@@ -220,41 +254,14 @@ namespace Okay
 		Chunk& chunk = pChunkGeneration->chunk;
 		std::atomic<bool>& cancel = pChunkGeneration->cancel;
 
-		siv::PerlinNoise::seed_type seed = m_worldGenData.seed;
-		siv::PerlinNoise perlin{ seed };
-
-		for (uint32_t x = 0; x < CHUNK_WIDTH; x++)
+		for (uint32_t i = 0; i < MAX_BLOCKS_IN_CHUNK; i++)
 		{
-			for (uint32_t z = 0; z < CHUNK_WIDTH; z++)
-			{
-				if (cancel.load())
-					return;
+			glm::ivec3 chunkBlockCoord = chunkBlockIdxToChunkBlockCoord(i);
+			glm::ivec3 blockCoord = chunkBlockCoordToBlockCoord(chunkID, chunkBlockCoord);
+			chunk.blocks[i] = generateBlock(blockCoord);
 
-				glm::ivec3 blockCoord = chunkBlockCoordToBlockCoord(chunkID, { x, 0, z });
-				float noise = perlin.octave2D_11(blockCoord.x * m_worldGenData.frequency, blockCoord.z * m_worldGenData.frequency, m_worldGenData.octaves);
-				noise = m_worldGenData.noiseInterpolation.sample(noise);
-
-				int columnHeight = int(noise * m_worldGenData.amplitude + m_worldGenData.oceanHeight);
-				columnHeight = glm::clamp(columnHeight, 1, (int)WORLD_HEIGHT);
-
-				int grassDepth = 4;
-				int stoneHeight = (int)glm::max((int)columnHeight - (int)grassDepth, 0);
-
-				for (int y = 0; y < stoneHeight; y++)
-				{
-					chunk.blocks[chunkBlockCoordToChunkBlockIdx({ x, y, z })] = BlockType::STONE;
-				}
-
-				for (int y = stoneHeight; y < columnHeight; y++)
-				{
-					chunk.blocks[chunkBlockCoordToChunkBlockIdx({ x, y, z })] = y < columnHeight - 1 ? BlockType::DIRT : BlockType::GRASS;
-				}
-
-				for (int y = columnHeight; y < (int)m_worldGenData.oceanHeight; y++)
-				{
-					chunk.blocks[chunkBlockCoordToChunkBlockIdx({ x, y, z })] = BlockType::WATER;
-				}
-			}
+			if (cancel.load())
+				return;
 		}
 	}
 

@@ -108,7 +108,9 @@ void App::handleImgui()
 	WorldGenerationData& worldGenData = m_world.m_worldGenData;
 	float frequencyDenominator = 1.f / worldGenData.frequency;
 
-	ImGui::DragInt("Seed", (int*)&worldGenData.seed, 0.2f);
+	if (ImGui::DragInt("Seed", (int*)&worldGenData.seed, 0.2f))
+		m_world.applySeed();
+
 	ImGui::DragInt("Num Octaves", (int*)&worldGenData.octaves, 0.2f);
 	ImGui::DragInt("Ocean Height", (int*)&worldGenData.oceanHeight, 0.2f);
 	ImGui::DragFloat("Frequency Denominator", &frequencyDenominator);
