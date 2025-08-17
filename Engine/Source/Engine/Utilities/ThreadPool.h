@@ -1,6 +1,6 @@
 #pragma once
 #include <thread>
-#include <queue>
+#include <deque>
 #include <condition_variable>
 #include <functional>
 
@@ -20,6 +20,8 @@ namespace Okay
 		static void initialize(uint32_t numThreads);
 		static void shutdown();
 		static void queueJob(const std::function<void()>& job);
+		static void queueJobFront(const std::function<void()>& job);
+
 
 	private:
 		static void waitForJob();
@@ -28,7 +30,7 @@ namespace Okay
 		static std::mutex s_queueMutis;
 		static std::condition_variable s_mutisCondition;
 		static std::vector<std::thread> s_workerThreads;
-		static std::queue<std::function<void()>> s_jobs;
+		static std::deque<std::function<void()>> s_jobs;
 
 	};
 }

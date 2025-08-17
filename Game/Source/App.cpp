@@ -91,6 +91,22 @@ void App::updateCamera(TimeStep dt)
 	m_camera.fov = glm::clamp(m_camera.fov - Input::getScrollDelta(), 5.f, 90.f);
 }
 
+static void imguiNoiseSamplingControls(Noise::SamplingData& samplingData, std::string_view imGuiID)
+{
+	ImGui::PushID(imGuiID.data());
+
+	ImGui::DragInt("Num Octaves", (int*)&samplingData.numOctaves, 0.2f);
+	ImGui::DragFloat("Frequency Numerator", &samplingData.frequencyNumerator, 0.01f);
+	ImGui::DragFloat("Frequency Denominator", &samplingData.frequencyDenominator, 0.1f);
+	ImGui::DragFloat("Persistance", &samplingData.persistence, 0.01f);
+	ImGui::DragFloat("Exponent", &samplingData.exponent, 0.01f);
+
+	ImGui::PopID();
+
+	if (samplingData.frequencyDenominator == 0.f)
+		samplingData.frequencyDenominator = 0.000001f;
+}
+
 void App::handleImgui()
 {
 	if (!ImGui::Begin("World Generation"))
@@ -106,24 +122,32 @@ void App::handleImgui()
 	}
 
 	WorldGenerationData& worldGenData = m_world.m_worldGenData;
-	float frequencyDenominator = 1.f / worldGenData.frequency;
 
 	if (ImGui::DragInt("Seed", (int*)&worldGenData.seed, 0.2f))
 		m_world.applySeed();
 
-	ImGui::DragInt("Num Octaves", (int*)&worldGenData.octaves, 0.2f);
+	ImGui::Separator();
+
+	// Terrain
+	ImGui::Text("Terrain");
+	imguiNoiseSamplingControls(worldGenData.terrainNoiseData, "Terrain");
 	ImGui::DragInt("Ocean Height", (int*)&worldGenData.oceanHeight, 0.2f);
-	ImGui::DragFloat("Frequency Denominator", &frequencyDenominator);
-	ImGui::DragFloat("Persistance", &worldGenData.persistance, 0.01f);
 	ImGui::DragFloat("Amplitude", &worldGenData.amplitude, 0.1f);
+	
+	ImGui::Separator();
 
-	worldGenData.frequency = 1.f / frequencyDenominator;
+	// Trees
+	ImGui::Text("Trees");
+	imguiNoiseSamplingControls(worldGenData.treeNoiseData, "Trees");
+	ImGui::DragFloat("Tree threshold", &worldGenData.treeThreshold, 0.01f);
 
-	if (ImPlot::BeginPlot("Test"))
+
+	// Terrain Noise Interpoloation
+	if (ImPlot::BeginPlot("Terrain Noise Interpoloation"))
 	{
 		ImPlot::SetupAxesLimits(-1.2, 1.2, -1.2, 1.2);
 
-		InterpolationList& noiseInterpolation = worldGenData.noiseInterpolation;
+		InterpolationList& noiseInterpolation = worldGenData.terrrainNoiseInterpolation;
 
 		if (ImGui::Button("New Point"))
 		{

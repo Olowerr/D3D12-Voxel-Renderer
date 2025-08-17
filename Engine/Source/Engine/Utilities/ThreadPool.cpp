@@ -6,7 +6,7 @@ namespace Okay
 	std::mutex ThreadPool::s_queueMutis;
 	std::condition_variable ThreadPool::s_mutisCondition;
 	std::vector<std::thread> ThreadPool::s_workerThreads;
-	std::queue<std::function<void()>> ThreadPool::s_jobs;
+	std::deque<std::function<void()>> ThreadPool::s_jobs;
 
 	void ThreadPool::initialize(uint32_t numThreads)
 	{
@@ -31,7 +31,16 @@ namespace Okay
 	void ThreadPool::queueJob(const std::function<void()>& job)
 	{
 		std::unique_lock lock(s_queueMutis);
-		s_jobs.push(job);
+		s_jobs.push_back(job);
+		lock.unlock();
+
+		s_mutisCondition.notify_one();
+	}
+
+	void ThreadPool::queueJobFront(const std::function<void()>& job)
+	{
+		std::unique_lock lock(s_queueMutis);
+		s_jobs.push_front(job);
 		lock.unlock();
 
 		s_mutisCondition.notify_one();
@@ -50,7 +59,7 @@ namespace Okay
 				break;
 
 			std::function<void()> job = s_jobs.front();
-			s_jobs.pop();
+			s_jobs.pop_front();
 			lock.unlock();
 
 			job();

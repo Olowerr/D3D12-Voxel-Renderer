@@ -7,9 +7,6 @@
 
 #include <shared_mutex>
 
-#define DB_PERLIN_IMPL
-#include "db_perlin/db_perlin.hpp"
-
 namespace Okay
 {
 	static const uint32_t RENDER_DISTNACE = 32;
@@ -17,11 +14,21 @@ namespace Okay
 
 	World::World()
 	{
-		m_worldGenData.noiseInterpolation.addPoint(-0.45f, -0.55f);
-		m_worldGenData.noiseInterpolation.addPoint(-0.1f, 0.f);
-		m_worldGenData.noiseInterpolation.addPoint(0.f, 0.1f);
-		m_worldGenData.noiseInterpolation.addPoint(0.275f, 0.15f);
-		m_worldGenData.noiseInterpolation.addPoint(0.65f, 0.525f);
+		m_worldGenData.terrrainNoiseInterpolation.addPoint(-0.45f, -0.55f);
+		m_worldGenData.terrrainNoiseInterpolation.addPoint(-0.1f, 0.f);
+		m_worldGenData.terrrainNoiseInterpolation.addPoint(0.f, 0.1f);
+		m_worldGenData.terrrainNoiseInterpolation.addPoint(0.275f, 0.15f);
+		m_worldGenData.terrrainNoiseInterpolation.addPoint(0.65f, 0.525f);
+
+		m_worldGenData.terrainNoiseData.numOctaves = 4;
+		m_worldGenData.terrainNoiseData.frequencyNumerator = 1.f;
+		m_worldGenData.terrainNoiseData.frequencyDenominator = 150.f;
+
+		m_worldGenData.treeNoiseData.numOctaves = 2;
+		m_worldGenData.treeNoiseData.frequencyNumerator = 0.835f;
+		m_worldGenData.treeNoiseData.frequencyDenominator = 1.f;
+		m_worldGenData.treeNoiseData.exponent = 3.39f;
+		m_worldGenData.treeThreshold = 0.46f;
 
 		applySeed();
 	}
@@ -69,13 +76,22 @@ namespace Okay
 		return block != BlockType::AIR && block != BlockType::WATER;
 	}
 
+	bool World::shouldPlaceTree(int columnHeight, const glm::ivec3& blockCoord) const
+	{
+		if (glm::abs((int)columnHeight - blockCoord.y) > 4 || columnHeight <= (int)m_worldGenData.oceanHeight)
+			return false;
+
+		float noise = Noise::samplePerlin2D_zeroOne((float)blockCoord.x, (float)blockCoord.z, m_worldGenData.treeNoiseData);
+		return noise >= m_worldGenData.treeThreshold;
+	}
+
 	BlockType World::generateBlock(const glm::ivec3& blockCoord)
 	{
-		float noise = db::perlin_octave2D(blockCoord.x * m_worldGenData.frequency, blockCoord.z * m_worldGenData.frequency, m_worldGenData.octaves, m_worldGenData.persistance);
-		noise = m_worldGenData.noiseInterpolation.sample(noise);
+		float noise = Noise::samplePerlin2D_minusOneOne((float)blockCoord.x, (float)blockCoord.z, m_worldGenData.terrainNoiseData);
+		noise = m_worldGenData.terrrainNoiseInterpolation.sample(noise);
 
-		int columnHeight = int(noise * m_worldGenData.amplitude + m_worldGenData.oceanHeight);
-		columnHeight = glm::clamp(columnHeight, 1, (int)WORLD_HEIGHT);
+		float scaledNoise = noise * m_worldGenData.amplitude + m_worldGenData.oceanHeight;
+		int columnHeight = glm::clamp((int)scaledNoise, 1, (int)WORLD_HEIGHT);
 
 		int grassDepth = 4;
 		int stoneHeight = (int)glm::max((int)columnHeight - (int)grassDepth, 0);
@@ -85,16 +101,19 @@ namespace Okay
 
 		if (blockCoord.y >= stoneHeight && blockCoord.y < columnHeight)
 			return blockCoord.y < columnHeight - 1 ? BlockType::DIRT : BlockType::GRASS;
-
+		
 		if (blockCoord.y >= columnHeight && blockCoord.y < (int)m_worldGenData.oceanHeight)
 			return BlockType::WATER;
 	
+		if (shouldPlaceTree(columnHeight, blockCoord))
+			return BlockType::STONE;
+
 		return BlockType::AIR;
 	}
 
 	void World::applySeed() const
 	{
-		db::reseed(m_worldGenData.seed);
+		Noise::applyPerlinSeed(m_worldGenData.seed);
 	}
 
 	void World::resetWorld()

@@ -2,6 +2,7 @@
 
 #include "Chunk.h"
 #include "Engine/Utilities/InterpolationList.h"
+#include "Engine/Utilities/Noise.h"
 
 #include <atomic>
 #include <unordered_map>
@@ -19,14 +20,14 @@ namespace Okay
 	struct WorldGenerationData
 	{
 		uint32_t seed = 0;
-		uint32_t octaves = 4;
-		float frequency = 1.f / 150.f;
-		float persistance = 0.5f;
+		uint32_t oceanHeight = 70;
 		float amplitude = 70.f;
 
-		uint32_t oceanHeight = 70;
+		Noise::SamplingData terrainNoiseData;
+		InterpolationList terrrainNoiseInterpolation = InterpolationList({ -1.f, -1.f }, { 1.f, 1.f });
 
-		InterpolationList noiseInterpolation = InterpolationList({ -1.f, -1.f }, { 1.f, 1.f });
+		Noise::SamplingData treeNoiseData;
+		float treeThreshold;
 	};
 
 	class Window;
@@ -62,6 +63,7 @@ namespace Okay
 	private:
 		void launchChunkGenerationThread(ChunkID chunkID);
 		void generateChunk(ChunkGeneration* pChunkGeneration);
+		bool shouldPlaceTree(int columnHeight, const glm::ivec3& blockCoord) const;
 
 		void clearUpdatedChunks();
 		void unloadDistantChunks();

@@ -552,6 +552,7 @@ namespace Okay
 				}	
 
 				const World* pWorld = &world;
+				//ThreadPool::queueJobFront([=]()
 				ThreadPool::queueJob([=]()
 					{
 						ChunkMeshData outMeshData;

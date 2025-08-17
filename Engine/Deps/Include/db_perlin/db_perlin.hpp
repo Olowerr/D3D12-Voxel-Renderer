@@ -1,3 +1,5 @@
+#pragma once
+
 /*
  * db-perlin - see license at the bottom, no warranty implied, use at your own risk;
  *     made by daniilsjb (https://github.com/daniilsjb/perlin-noise)
@@ -33,9 +35,6 @@
  * depending on the desired accuracy.
  */
 
-#ifndef DB_PERLIN_HPP
-#define DB_PERLIN_HPP
-
 #include <array>
 #include <algorithm>
 #include <random>
@@ -50,8 +49,6 @@ namespace db {
     template<typename T>
     constexpr auto perlin(T x, T y, T z) -> T;
 }
-
-#ifdef DB_PERLIN_IMPL
 
 /*
  * The implementation was based on this article:
@@ -355,10 +352,6 @@ template auto db::perlin3D<float>(float x, float y, float z) -> float;
 template auto db::perlin1D<double>(double x) -> double;
 template auto db::perlin2D<double>(double x, double y) -> double;
 template auto db::perlin3D<double>(double x, double y, double z) -> double;
-
-#endif // DB_PERLIN_IMPL
-
-#endif // DB_PERLIN_HPP
 
 /*
 MIT License
