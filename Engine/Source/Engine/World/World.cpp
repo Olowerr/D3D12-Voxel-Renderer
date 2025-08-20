@@ -1,7 +1,6 @@
 #include "World.h"
 #include "Engine/Application/Time.h"
 #include "Engine/Application/Input.h"
-#include "Engine/Utilities/ThreadPool.h"
 #include "Engine/Application/Window.h"
 #include "Camera.h"
 
@@ -11,9 +10,12 @@ namespace Okay
 {
 	static const uint32_t RENDER_DISTNACE = 32;
 	static std::shared_mutex mutis;
-
-	World::World()
+	
+	void World::initialize()
 	{
+		uint32_t numThreads = glm::max(uint32_t(std::thread::hardware_concurrency() * 0.75), 1u);
+		m_threadPool.initialize(numThreads);
+
 		m_worldGenData.terrrainNoiseInterpolation.addPoint(-0.45f, -0.55f);
 		m_worldGenData.terrrainNoiseInterpolation.addPoint(-0.1f, 0.f);
 		m_worldGenData.terrrainNoiseInterpolation.addPoint(0.f, 0.1f);
@@ -31,6 +33,11 @@ namespace Okay
 		m_worldGenData.treeThreshold = 0.46f;
 
 		applySeed();
+	}
+
+	void World::shutdown()
+	{
+		m_threadPool.shutdown();
 	}
 
 	void World::update(const Camera& camera)
@@ -292,7 +299,7 @@ namespace Okay
 		chunkGeneration.cancel.store(false);
 
 		ChunkGeneration* pChunkGeneration = &chunkGeneration;
-		ThreadPool::queueJob([=]()
+		m_threadPool.queueJob([=]()
 		{
 			generateChunk(pChunkGeneration);
 			pChunkGeneration->threadFinished.store(true);

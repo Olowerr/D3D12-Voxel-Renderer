@@ -1,7 +1,6 @@
 #include "Renderer.h"
 #include "Engine/Application/Window.h"
 #include "Engine/World/World.h"
-#include "Engine/Utilities/ThreadPool.h"
 #include "Engine/Application/ImguiHelper.h"
 #include "Engine/World/Camera.h"
 
@@ -73,6 +72,9 @@ namespace Okay
 
 		generateTextureSheetMipMaps(m_pTextureSheet, TEXTURE_SHEET_TILE_SIZE);
 
+		uint32_t numThreads = glm::max(uint32_t(std::thread::hardware_concurrency() * 0.25), 1u);
+		m_threadPool.initialize(numThreads);
+
 		// In this version of Imgui, only 1 SRV is needed, it's stated that future versions will need more, but I don't see a reason to switch version atm :]
 		m_pImguiDescriptorHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, true, L"Imgui");
 		imguiInitialize(window, m_pDevice, m_pCommandQueue, m_pImguiDescriptorHeap, MAX_FRAMES_IN_FLIGHT);
@@ -101,6 +103,7 @@ namespace Okay
 
 		m_gpuVertexData.shutdown();
 		m_gpuIndicesData.shutdown();
+		m_threadPool.shutdown();
 
 		D3D12_RELEASE(m_pImguiDescriptorHeap);
 		imguiShutdown();
@@ -552,8 +555,7 @@ namespace Okay
 				}	
 
 				const World* pWorld = &world;
-				//ThreadPool::queueJobFront([=]()
-				ThreadPool::queueJob([=]()
+				m_threadPool.queueJob([=]()
 					{
 						ChunkMeshData outMeshData;
 						generateChunkMesh(pWorld, adjacentChunkID, chunkGenID, outMeshData);

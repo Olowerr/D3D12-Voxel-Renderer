@@ -2,64 +2,49 @@
 
 namespace Okay
 {
-	bool ThreadPool::s_stop = false;
-	std::mutex ThreadPool::s_queueMutis;
-	std::condition_variable ThreadPool::s_mutisCondition;
-	std::vector<std::thread> ThreadPool::s_workerThreads;
-	std::deque<std::function<void()>> ThreadPool::s_jobs;
-
 	void ThreadPool::initialize(uint32_t numThreads)
 	{
-		s_workerThreads.reserve(numThreads);
+		m_workerThreads.reserve(numThreads);
 		for (uint32_t i = 0; i < numThreads; i++)
 		{
-			s_workerThreads.emplace_back(ThreadPool::waitForJob);
+			m_workerThreads.emplace_back(&ThreadPool::waitForJob, this);
 		}
 	}
 
 	void ThreadPool::shutdown()
 	{
-		std::unique_lock lock(s_queueMutis);
-		s_stop = true;
+		std::unique_lock lock(m_queueMutis);
+		m_stop = true;
 		lock.unlock();
 
-		s_mutisCondition.notify_all();
-		for (std::thread& thread : s_workerThreads)
+		m_mutisCondition.notify_all();
+		for (std::thread& thread : m_workerThreads)
 			thread.join();
 	}
 
 	void ThreadPool::queueJob(const std::function<void()>& job)
 	{
-		std::unique_lock lock(s_queueMutis);
-		s_jobs.push_back(job);
+		std::unique_lock lock(m_queueMutis);
+		m_jobs.push_back(job);
 		lock.unlock();
 
-		s_mutisCondition.notify_one();
-	}
-
-	void ThreadPool::queueJobFront(const std::function<void()>& job)
-	{
-		std::unique_lock lock(s_queueMutis);
-		s_jobs.push_front(job);
-		lock.unlock();
-
-		s_mutisCondition.notify_one();
+		m_mutisCondition.notify_one();
 	}
 
 	void ThreadPool::waitForJob()
 	{
 		while (true)
 		{
-			std::unique_lock lock(s_queueMutis);
-			s_mutisCondition.wait(lock, []()
+			std::unique_lock lock(m_queueMutis);
+			m_mutisCondition.wait(lock, [&]()
 				{
-					return !s_jobs.empty() || s_stop;
+					return !m_jobs.empty() || m_stop;
 				});
-			if (s_stop)
+			if (m_stop)
 				break;
 
-			std::function<void()> job = s_jobs.front();
-			s_jobs.pop_front();
+			std::function<void()> job = m_jobs.front();
+			m_jobs.pop_front();
 			lock.unlock();
 
 			job();

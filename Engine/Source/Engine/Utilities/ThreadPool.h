@@ -15,22 +15,21 @@ namespace Okay
 	class ThreadPool
 	{
 	public:
-		ThreadPool() = delete;
+		ThreadPool() = default;
+		~ThreadPool() = default;
 
-		static void initialize(uint32_t numThreads);
-		static void shutdown();
-		static void queueJob(const std::function<void()>& job);
-		static void queueJobFront(const std::function<void()>& job);
-
+		void initialize(uint32_t numThreads);
+		void shutdown();
+		void queueJob(const std::function<void()>& job);
 
 	private:
-		static void waitForJob();
+		void waitForJob();
 
-		static bool s_stop;
-		static std::mutex s_queueMutis;
-		static std::condition_variable s_mutisCondition;
-		static std::vector<std::thread> s_workerThreads;
-		static std::deque<std::function<void()>> s_jobs;
+		bool m_stop = false;
+		std::mutex m_queueMutis;
+		std::condition_variable m_mutisCondition;
+		std::vector<std::thread> m_workerThreads;
+		std::deque<std::function<void()>> m_jobs;
 
 	};
 }

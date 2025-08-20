@@ -11,10 +11,10 @@ namespace Okay
 		bool glInit = glfwInit();
 		OKAY_ASSERT(glInit);
 
-		ThreadPool::initialize(std::thread::hardware_concurrency() / 2);
-
 		m_window.initiate(windowTitle, windowWidth, windowHeight);
 		m_renderer.initialize(m_window);
+
+		m_world.initialize();
 
 		m_camera.viewportDims = m_window.getWindowSize();
 		m_window.registerResizeCallback([&](uint32_t width, uint32_t height)
@@ -28,7 +28,8 @@ namespace Okay
 	{
 		m_window.shutdown();
 		m_renderer.shutdown();
-		ThreadPool::shutdown();
+		m_world.shutdown();
+
 		glfwTerminate();
 	}
 

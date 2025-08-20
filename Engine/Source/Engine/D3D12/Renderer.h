@@ -2,6 +2,7 @@
 #include "RingBuffer.h"
 #include "ResourceArena.h"
 #include "Engine/World/Chunk.h"
+#include "Engine/Utilities/ThreadPool.h"
 
 #include <atomic>
 
@@ -229,6 +230,8 @@ namespace Okay
 		void createVoxelRenderPass();
 
 	private:
+		ThreadPool m_threadPool;
+
 		ID3D12Device* m_pDevice = nullptr;
 		ID3D12CommandQueue* m_pCommandQueue = nullptr;
 		IDXGISwapChain3* m_pSwapChain = nullptr;

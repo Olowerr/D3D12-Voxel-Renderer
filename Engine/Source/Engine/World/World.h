@@ -3,6 +3,7 @@
 #include "Chunk.h"
 #include "Engine/Utilities/InterpolationList.h"
 #include "Engine/Utilities/Noise.h"
+#include "Engine/Utilities/ThreadPool.h"
 
 #include <atomic>
 #include <unordered_map>
@@ -36,8 +37,11 @@ namespace Okay
 	class World
 	{
 	public:
-		World();
+		World() = default;
 		~World() = default;
+
+		void initialize();
+		void shutdown();
 
 		void update(const Camera& camera);
 
@@ -76,6 +80,8 @@ namespace Okay
 		bool isChunkInView(const Camera& camera, ChunkID chunkID) const;
 
 	private:
+		ThreadPool m_threadPool;
+
 		glm::ivec2 m_currentCamChunkCoord = glm::ivec2(0, 0);
 		float m_aspectRatio = 0.f;
 
