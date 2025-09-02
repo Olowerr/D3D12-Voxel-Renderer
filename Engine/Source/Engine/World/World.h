@@ -4,6 +4,8 @@
 #include "Engine/Utilities/InterpolationList.h"
 #include "Engine/Utilities/Noise.h"
 #include "Engine/Utilities/ThreadPool.h"
+#include "Engine/Application/Time.h"
+#include "Structure.h"
 
 #include <atomic>
 #include <unordered_map>
@@ -13,7 +15,6 @@ namespace Okay
 	struct ChunkGeneration
 	{
 		std::atomic<bool> threadFinished;
-		std::atomic<bool> cancel;
 		ChunkID chunkID = INVALID_CHUNK_ID;
 		Chunk chunk;
 	};
@@ -27,8 +28,12 @@ namespace Okay
 		Noise::SamplingData terrainNoiseData;
 		InterpolationList terrrainNoiseInterpolation = InterpolationList({ -1.f, -1.f }, { 1.f, 1.f });
 
+		Noise::SamplingData treeAreaNoiseData;
+		float treeAreaNoiseThreshold = 0.5f;
+
 		Noise::SamplingData treeNoiseData;
-		float treeThreshold;
+		float treeThreshold = 0.46f;
+		uint32_t treeMaxSpawnAltitude = 90;
 	};
 
 	class Window;
@@ -67,8 +72,13 @@ namespace Okay
 	private:
 		void launchChunkGenerationThread(ChunkID chunkID);
 		void generateChunk(ChunkGeneration* pChunkGeneration);
-		bool shouldPlaceTree(int columnHeight, const glm::ivec3& blockCoord) const;
+		bool shouldPlaceTree(const glm::ivec3& blockCoordXZ) const;
+		uint32_t findColoumnHeight(const glm::ivec3& blockCoordXZ);
 
+		void loadChunkStructures(ChunkID chunkID);
+		BlockType searchChunkForStructure(ChunkID chunkID, const glm::ivec3& blockCoord) const;
+		BlockType tryFindStructureBlock(const glm::ivec3& blockCoord) const;
+		
 		void clearUpdatedChunks();
 		void unloadDistantChunks();
 		void processLoadingChunks();
@@ -87,6 +97,7 @@ namespace Okay
 
 		std::unordered_map<ChunkID, Chunk> m_loadedChunks;
 		std::unordered_map<ChunkID, ChunkGeneration> m_loadingChunks;
+		std::unordered_map<ChunkID, ChunkStructures> m_chunksStructures;
 
 		std::vector<ChunkID> m_addedChunks;
 		std::vector<ChunkID> m_removedChunks;

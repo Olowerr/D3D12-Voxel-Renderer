@@ -72,7 +72,7 @@ namespace Okay
 
 		generateTextureSheetMipMaps(m_pTextureSheet, TEXTURE_SHEET_TILE_SIZE);
 
-		uint32_t numThreads = glm::max(uint32_t(std::thread::hardware_concurrency() * 0.25), 1u);
+		uint32_t numThreads = glm::max(uint32_t(std::thread::hardware_concurrency() * 0.5), 1u);
 		m_threadPool.initialize(numThreads);
 
 		// In this version of Imgui, only 1 SRV is needed, it's stated that future versions will need more, but I don't see a reason to switch version atm :]

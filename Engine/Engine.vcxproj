@@ -47,6 +47,7 @@
     <ClInclude Include="Source\Engine\World\Blocks.h" />
     <ClInclude Include="Source\Engine\World\Camera.h" />
     <ClInclude Include="Source\Engine\World\Chunk.h" />
+    <ClInclude Include="Source\Engine\World\Structure.h" />
     <ClInclude Include="Source\Engine\World\Transform.h" />
     <ClInclude Include="Source\Engine\World\World.h" />
   </ItemGroup>

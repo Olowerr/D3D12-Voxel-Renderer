@@ -139,7 +139,12 @@ void App::handleImgui()
 	// Trees
 	ImGui::Text("Trees");
 	imguiNoiseSamplingControls(worldGenData.treeNoiseData, "Trees");
-	ImGui::DragFloat("Tree threshold", &worldGenData.treeThreshold, 0.01f);
+	ImGui::DragFloat("Spawn threshold", &worldGenData.treeThreshold, 0.01f);
+	ImGui::DragInt("Max spawn altitude", (int*)&worldGenData.treeMaxSpawnAltitude, 0.2f);
+
+	ImGui::Text("Tree Area");
+	imguiNoiseSamplingControls(worldGenData.treeAreaNoiseData, "TreesArea");
+	ImGui::DragFloat("Area threshold", &worldGenData.treeAreaNoiseThreshold, 0.01f);
 
 
 	// Terrain Noise Interpoloation

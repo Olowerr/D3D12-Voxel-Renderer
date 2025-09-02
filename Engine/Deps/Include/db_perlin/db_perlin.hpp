@@ -74,7 +74,7 @@ namespace db {
 
 namespace db {
     // Permutation table, the second half is a mirror of the first half.
-    static std::array<unsigned char, 512> p = {
+    static std::array<unsigned char, 512> permutation = {
         0x97, 0xA0, 0x89, 0x5B, 0x5A, 0x0F, 0x83, 0x0D, 0xC9, 0x5F, 0x60, 0x35, 0xC2, 0xE9, 0x07, 0xE1,
         0x8C, 0x24, 0x67, 0x1E, 0x45, 0x8E, 0x08, 0x63, 0x25, 0xF0, 0x15, 0x0A, 0x17, 0xBE, 0x06, 0x94,
         0xF7, 0x78, 0xEA, 0x4B, 0x00, 0x1A, 0xC5, 0x3E, 0x5E, 0xFC, 0xDB, 0xCB, 0x75, 0x23, 0x0B, 0x20,
@@ -110,12 +110,15 @@ namespace db {
         0xDE, 0x72, 0x43, 0x1D, 0x18, 0x48, 0xF3, 0x8D, 0x80, 0xC3, 0x4E, 0x42, 0xD7, 0x3D, 0x9C, 0xB4,
     };
 
+    static std::array<unsigned char, 512> origPermutation = permutation;
+
     template<typename T>
     constexpr auto reseed(T seed) -> void {
+        permutation = origPermutation;
 
         std::mt19937 mt(seed);
-        std::shuffle(p.begin(), p.begin() + 256, mt);
-        memcpy(p.data() + 256, p.data(), 256);
+        std::shuffle(permutation.begin(), permutation.begin() + 256, mt);
+        memcpy(permutation.data() + 256, permutation.data(), 256);
     }
 
     template<typename T>
@@ -207,8 +210,8 @@ namespace db {
         T const u = fade(xf0);
 
         // Generate hash values for each point of the unit-line.
-        int const h0 = p[xi + 0];
-        int const h1 = p[xi + 1];
+        int const h0 = permutation[xi + 0];
+        int const h1 = permutation[xi + 1];
 
         // Linearly interpolate between dot products of each gradient with its distance to the input location.
         return lerp(dot_grad(h0, xf0), dot_grad(h1, xf1), u);
@@ -235,10 +238,10 @@ namespace db {
         T const v = fade(yf0);
 
         // Generate hash values for each point of the unit-square.
-        int const h00 = p[p[xi + 0] + yi + 0];
-        int const h01 = p[p[xi + 0] + yi + 1];
-        int const h10 = p[p[xi + 1] + yi + 0];
-        int const h11 = p[p[xi + 1] + yi + 1];
+        int const h00 = permutation[permutation[xi + 0] + yi + 0];
+        int const h01 = permutation[permutation[xi + 0] + yi + 1];
+        int const h10 = permutation[permutation[xi + 1] + yi + 0];
+        int const h11 = permutation[permutation[xi + 1] + yi + 1];
 
         // Linearly interpolate between dot products of each gradient with its distance to the input location.
         T const x1 = lerp(dot_grad(h00, xf0, yf0), dot_grad(h10, xf1, yf0), u);
@@ -272,14 +275,14 @@ namespace db {
         T const w = fade(zf0);
 
         // Generate hash values for each point of the unit-cube.
-        int const h000 = p[p[p[xi + 0] + yi + 0] + zi + 0];
-        int const h001 = p[p[p[xi + 0] + yi + 0] + zi + 1];
-        int const h010 = p[p[p[xi + 0] + yi + 1] + zi + 0];
-        int const h011 = p[p[p[xi + 0] + yi + 1] + zi + 1];
-        int const h100 = p[p[p[xi + 1] + yi + 0] + zi + 0];
-        int const h101 = p[p[p[xi + 1] + yi + 0] + zi + 1];
-        int const h110 = p[p[p[xi + 1] + yi + 1] + zi + 0];
-        int const h111 = p[p[p[xi + 1] + yi + 1] + zi + 1];
+        int const h000 = permutation[permutation[permutation[xi + 0] + yi + 0] + zi + 0];
+        int const h001 = permutation[permutation[permutation[xi + 0] + yi + 0] + zi + 1];
+        int const h010 = permutation[permutation[permutation[xi + 0] + yi + 1] + zi + 0];
+        int const h011 = permutation[permutation[permutation[xi + 0] + yi + 1] + zi + 1];
+        int const h100 = permutation[permutation[permutation[xi + 1] + yi + 0] + zi + 0];
+        int const h101 = permutation[permutation[permutation[xi + 1] + yi + 0] + zi + 1];
+        int const h110 = permutation[permutation[permutation[xi + 1] + yi + 1] + zi + 0];
+        int const h111 = permutation[permutation[permutation[xi + 1] + yi + 1] + zi + 1];
 
         // Linearly interpolate between dot products of each gradient with its distance to the input location.
         T const x11 = lerp(dot_grad(h000, xf0, yf0, zf0), dot_grad(h100, xf1, yf0, zf0), u);
