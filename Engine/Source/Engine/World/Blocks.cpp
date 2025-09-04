@@ -39,6 +39,7 @@ namespace Okay
 
 		// Manually set some textures so we can reuse them
 		outTextures[BlockType::GRASS].textures[BlockSide::BOTTOM] = "dirt";
+		outTextures[BlockType::OAK_LOG].textures[BlockSide::BOTTOM] = "oak_log_top";
 
 
 		// Ensure every side of every block has a texture

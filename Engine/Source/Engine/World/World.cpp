@@ -85,7 +85,7 @@ namespace Okay
 		uint32_t chunkBlockIdx = chunkBlockCoordToChunkBlockIdx(chunkBlockCoord);
 
 		BlockType block = tryGetBlock(blockCoordToChunkID(blockCoord), chunkBlockIdx);
-		return block != BlockType::AIR && block != BlockType::WATER;
+		return block != BlockType::AIR && block != BlockType::WATER && block != BlockType::OAK_LEAVES;
 	}
 
 	bool World::shouldPlaceTree(const glm::ivec3& blockCoord) const
@@ -192,10 +192,6 @@ namespace Okay
 
 	BlockType World::generateBlock(const glm::ivec3& blockCoord)
 	{
-		BlockType structureBlock = tryFindStructureBlock(blockCoord);
-		if (structureBlock != BlockType::INVALID)
-			return structureBlock;
-
 		int columnHeight = (int)findColoumnHeight(blockCoord);
 		int grassDepth = 4;
 		int stoneHeight = glm::max((int)columnHeight - (int)grassDepth, 0);
@@ -213,6 +209,10 @@ namespace Okay
 		if (blockCoord.y >= columnHeight && blockCoord.y < (int)m_worldGenData.oceanHeight)
 			return BlockType::WATER;
 	
+		BlockType structureBlock = tryFindStructureBlock(blockCoord);
+		if (structureBlock != BlockType::INVALID)
+			return structureBlock;
+
 		return BlockType::AIR;
 	}
 

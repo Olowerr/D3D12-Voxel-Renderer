@@ -19,6 +19,8 @@ X(WATER, 1) \
 X(DIRT, 2) \
 X(GRASS, 3) \
 X(STONE, 4) \
+X(OAK_LOG, 5) \
+X(OAK_LEAVES, 6) \
 
 #define X(name, value) name = value,
 	enum struct BlockType : uint8_t

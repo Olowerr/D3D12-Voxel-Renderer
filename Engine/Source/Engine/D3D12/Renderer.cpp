@@ -1048,6 +1048,52 @@ namespace Okay
 			uint8_t* pSource = stbi_load(texturePath.c_str(), &sourceWidth, &sourceHeight, nullptr, STBI_rgb_alpha);
 			OKAY_ASSERT(pSource);
 
+			// Average out RGB values of transparent pixel (so mipmaps generates better)
+			for (int i = 0; i < sourceWidth * sourceHeight; i++)
+			{
+				uint32_t* pPixel = (uint32_t*)pSource + i;
+				uint8_t A = ((uint8_t*)pPixel)[3];
+				if (A == UINT8_MAX)
+					continue;
+
+				glm::ivec2 pixelCoord = glm::ivec2(i % sourceWidth, i / sourceWidth);
+				glm::ivec3 averageRGB = glm::ivec3(0);
+				uint32_t numSamples = 0;
+
+				for (int y = -1; y <= 1; y++)
+				{
+					for (int x = -1; x <= 1; x++)
+					{
+						glm::ivec2 adjacentCoord = glm::ivec2(pixelCoord.x + x, pixelCoord.y + y);
+						if (adjacentCoord.x < 0 || adjacentCoord.x >= sourceWidth || adjacentCoord.y < 0 || adjacentCoord.y >= sourceHeight)
+							continue;
+
+						int adjacentIdx = adjacentCoord.x + adjacentCoord.y * sourceWidth;
+						uint32_t adjacentPixel = ((uint32_t*)pSource)[adjacentIdx];
+						uint8_t adjacentAlpha = ((uint8_t*)&adjacentPixel)[3];
+						if (adjacentAlpha == 0)
+							continue;
+
+						uint8_t r = ((uint8_t*)&adjacentPixel)[0];
+						uint8_t g = ((uint8_t*)&adjacentPixel)[1];
+						uint8_t b = ((uint8_t*)&adjacentPixel)[2];
+
+						averageRGB += glm::ivec3(r, g, b);
+						numSamples++;
+					}
+				}
+
+				averageRGB = (glm::vec3)averageRGB / (float)numSamples;
+
+				uint8_t* pR = (uint8_t*)pPixel + 0;
+				uint8_t* pG = (uint8_t*)pPixel + 1;
+				uint8_t* pB = (uint8_t*)pPixel + 2;
+
+				*pR = averageRGB.r;
+				*pG = averageRGB.g;
+				*pB = averageRGB.b;
+			}
+
 			for (uint32_t i = 0; i < tileSize; i++)
 			{
 				memcpy(pTarget + i * footprint.Footprint.RowPitch, pSource + i * TEXTURE_SHEET_TILE_SIZE * 4, tileSize * 4ull);
