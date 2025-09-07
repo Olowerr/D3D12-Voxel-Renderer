@@ -172,6 +172,7 @@ namespace Okay
 		void postRender();
 
 		void drawGPUMeshInfo(const DXChunk& dxChunk, const GPUMeshInfo& gpuMeshInfo);
+		void drawSkyBox();
 
 		void signal(ID3D12Fence* pFence, uint64_t& fenceValue);
 		void execute(ID3D12GraphicsCommandList* pCommandList);
@@ -228,6 +229,7 @@ namespace Okay
 		uint32_t getTextureID(BlockType blockType, BlockSide blockSide);
 
 		void createVoxelRenderPass();
+		void createSkyboxRenderPass();
 
 	private:
 		ThreadPool m_threadPool;
@@ -246,6 +248,9 @@ namespace Okay
 		ID3D12RootSignature* m_pVoxelRootSignature = nullptr;
 		ID3D12PipelineState* m_pVoxelPSO = nullptr;
 		ID3D12PipelineState* m_pWaterPSO = nullptr;
+
+		ID3D12RootSignature* m_pSkyBoxRootSignature = nullptr;
+		ID3D12PipelineState* m_pSkyBoxPSO = nullptr;
 
 		D3D12_GPU_VIRTUAL_ADDRESS m_renderDataGVA = INVALID_UINT64;
 

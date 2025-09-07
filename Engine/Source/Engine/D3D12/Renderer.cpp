@@ -17,6 +17,8 @@ namespace Okay
 		uint32_t textureSheetTileSize = 0;
 		uint32_t textureSheetPadding = 0;
 		glm::vec2 padding0 = glm::vec2(0.f);
+		glm::vec3 cameraPos;
+		float padding1;
 	};
 	
 	struct GPUDrawCallData
@@ -56,6 +58,7 @@ namespace Okay
 			initializeFrameResources(frame, 100'000'000);
 
 		createVoxelRenderPass();
+		createSkyboxRenderPass();
 
 		m_gpuVertexData.initialize(m_pDevice, 1'000'000, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 		m_gpuIndicesData.initialize(m_pDevice, 1'000'000, D3D12_RESOURCE_STATE_INDEX_BUFFER);
@@ -96,6 +99,9 @@ namespace Okay
 		D3D12_RELEASE(m_pVoxelPSO);
 		D3D12_RELEASE(m_pWaterPSO);
 		D3D12_RELEASE(m_pTextureSheet);
+
+		D3D12_RELEASE(m_pSkyBoxRootSignature);
+		D3D12_RELEASE(m_pSkyBoxPSO);
 
 		D3D12_RELEASE(m_pRTVDescHeap);
 		D3D12_RELEASE(m_pDSVDescHeap);
@@ -171,6 +177,7 @@ namespace Okay
 
 		GPURenderData renderData = {};
 		renderData.viewProjMatrix = glm::transpose(camera.getProjectionMatrix() * camera.transform.getViewMatrix());
+		renderData.cameraPos = camera.transform.position;
 		renderData.textureSheetTileSize = TEXTURE_SHEET_TILE_SIZE;
 		renderData.textureSheetPadding = TEXTURE_SHEET_PADDING;
 
@@ -221,6 +228,8 @@ namespace Okay
 		{
 			drawGPUMeshInfo(dxChunk, dxChunk.waterGPUMeshInfo);
 		}
+
+		drawSkyBox();
 	}
 
 	void Renderer::postRender()
@@ -249,6 +258,19 @@ namespace Okay
 		frame.pCommandList->SetGraphicsRootShaderResourceView(2, gpuMeshInfo.vertexDataGVA);
 		frame.pCommandList->SetGraphicsRootConstantBufferView(1, dxChunk.drawDataGVA);
 		frame.pCommandList->DrawIndexedInstanced(gpuMeshInfo.indicesCount, 1, 0, 0, 0);
+	}
+
+	void Renderer::drawSkyBox()
+	{
+		// Function assumes the correct RTV, viewport, etc are already bound
+
+		FrameResources& frame = getCurrentFrameResorces();
+		
+		frame.pCommandList->SetGraphicsRootSignature(m_pSkyBoxRootSignature);
+		frame.pCommandList->SetPipelineState(m_pSkyBoxPSO);
+		frame.pCommandList->SetGraphicsRootConstantBufferView(0, m_renderDataGVA);
+
+		frame.pCommandList->DrawInstanced(36, 1, 0, 0);
 	}
 
 	void Renderer::signal(ID3D12Fence* pFence, uint64_t& fenceValue)
@@ -1379,6 +1401,37 @@ namespace Okay
 		pipelineDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 
 		DX_CHECK(m_pDevice->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_pWaterPSO)));
+
+		for (ID3DBlob*& pBlob : pShaderBlobs)
+			D3D12_RELEASE(pBlob);
+	}
+
+	void Renderer::createSkyboxRenderPass()
+	{
+		ID3DBlob* pShaderBlobs[5] = {};
+		uint32_t shaderBlobIdx = 0;
+
+		D3D12_ROOT_PARAMETER cameraParam = createRootParamCBV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0);
+
+		D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
+		rootDesc.NumParameters = 1;
+		rootDesc.pParameters = &cameraParam;
+		rootDesc.NumStaticSamplers = 0;
+		rootDesc.pStaticSamplers = nullptr;
+		rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+		m_pSkyBoxRootSignature = createRootSignature(&rootDesc, L"SkyboxRootSignature");
+
+		D3D12_GRAPHICS_PIPELINE_STATE_DESC pipelineDesc = createDefaultGraphicsPipelineStateDesc();
+		pipelineDesc.pRootSignature = m_pSkyBoxRootSignature;
+		pipelineDesc.VS = compileShader(SHADER_PATH / "SkyBoxVS.hlsl", "vs_5_1", &pShaderBlobs[shaderBlobIdx++]);
+		pipelineDesc.PS = compileShader(SHADER_PATH / "SkyBoxPS.hlsl", "ps_5_1", &pShaderBlobs[shaderBlobIdx++]);
+		pipelineDesc.NumRenderTargets = 1;
+		pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+		pipelineDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+		pipelineDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+		pipelineDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+
+		DX_CHECK(m_pDevice->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_pSkyBoxPSO)));
 
 		for (ID3DBlob*& pBlob : pShaderBlobs)
 			D3D12_RELEASE(pBlob);

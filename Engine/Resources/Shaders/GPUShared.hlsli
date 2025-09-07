@@ -15,6 +15,8 @@ struct RenderData
     uint textureSheetTileSize;
     uint textureSheetPadding;
     float2 padding0;
+    float3 cameraPos;
+    float padding1;
 };
 
 struct DrawCallData
@@ -33,6 +35,12 @@ struct WaterVSOutput
 {
     float4 svPosition : SV_POSITION;
     float2 uv : UV;
+};
+
+struct SkyBoxVSOutput
+{
+    float4 svPosition : SV_POSITION;
+    float3 localPos : LOCAL_POS;
 };
 
 struct Vertex
