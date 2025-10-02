@@ -2,17 +2,21 @@
 #include "Engine/Application/Input.h"
 #include "Engine/Application/Window.h"
 #include "Camera.h"
+#include "Engine/Utilities/Random.h"
 
 #include <shared_mutex>
 
 namespace Okay
 {
-	static const uint32_t RENDER_DISTNACE = 32;
+	const float CloudGenerationData::UPDATE_INTERVAL = 10.f;
+
 	static std::shared_mutex mutis;
 	static std::unordered_map<StructureType, StructureDescription> s_structureDescriptions;
 
 	void World::initialize()
 	{
+		applySeed();
+
 		uint32_t numThreads = glm::max(uint32_t(std::thread::hardware_concurrency() * 0.5), 1u);
 		m_threadPool.initialize(numThreads);
 
@@ -35,9 +39,22 @@ namespace Okay
 		m_worldGenData.treeAreaNoiseThreshold = 0.46f;
 		m_worldGenData.treeMaxSpawnAltitude = 83;
 
-		applySeed();
-
 		s_structureDescriptions[StructureType::TREE] = createTreeDescription();
+
+
+		m_cloudGenData.cloudNoise.numOctaves = 1;
+		m_cloudGenData.cloudNoise.frequencyNumerator = 1.f;
+		m_cloudGenData.cloudNoise.frequencyDenominator = 67.f;
+		m_cloudGenData.cloudNoise.persistence = 0.5f;
+		m_cloudGenData.cloudNoise.cutOff = 0.f;
+		m_cloudGenData.cloudNoise.exponent = 1.35f;
+
+		m_cloudGenData.maskNoise.numOctaves = 5;
+		m_cloudGenData.maskNoise.frequencyNumerator = 1.f;
+		m_cloudGenData.maskNoise.frequencyDenominator = 147.f;
+		m_cloudGenData.maskNoise.persistence = 0.48f;
+		m_cloudGenData.maskNoise.cutOff = 0.64f;
+		m_cloudGenData.maskNoise.exponent = 1.f;
 	}
 
 	void World::shutdown()
@@ -45,10 +62,12 @@ namespace Okay
 		m_threadPool.shutdown();
 	}
 
-	void World::update(const Camera& camera)
+	void World::update(const Camera& camera, TimeStep dt)
 	{
 		clearUpdatedChunks();
-		m_currentCamChunkCoord = chunkIDToChunkCoord(blockCoordToChunkID(camera.transform.position));
+		m_currentCamChunkCoord = chunkIDToChunkCoord(blockCoordToChunkID(glm::floor(camera.transform.position)));
+
+		updateClouds(camera, dt);
 
 		std::unique_lock lock(mutis);
 		unloadDistantChunks();
@@ -229,6 +248,101 @@ namespace Okay
 		m_chunksStructures.clear();
 	}
 
+	void World::recreateClouds()
+	{
+		m_cloudGenData.cloudList.clear();
+		m_cloudGenData.localDrift = glm::vec3(FLT_MAX);
+		m_cloudGenData.updateTimer = CloudGenerationData::UPDATE_INTERVAL;
+	}
+
+	void World::updateClouds(const Camera& camera, TimeStep dt)
+	{
+		m_cloudGenData.globalDrift += m_cloudGenData.velocity * dt;
+		m_cloudGenData.localDrift += m_cloudGenData.velocity * dt;
+
+		m_cloudGenData.updateTimer += dt;
+		if (m_cloudGenData.updateTimer < CloudGenerationData::UPDATE_INTERVAL)
+			return;
+
+		m_cloudGenData.updateTimer -= CloudGenerationData::UPDATE_INTERVAL;
+
+		clearDistanceClouds(camera);
+		generateCloudList(camera);
+
+		m_cloudGenData.localDrift = glm::vec2(camera.transform.position.x, camera.transform.position.z);
+	}
+
+	void World::generateCloudList(const Camera& camera)
+	{
+		float viewDistance = (float)m_cloudGenData.chunkVisiblityDistance * CHUNK_WIDTH;
+		glm::vec2 cameraXZPos = glm::vec2(camera.transform.position.x, camera.transform.position.z);
+
+		glm::vec2 min = glm::min(m_cloudGenData.localDrift, cameraXZPos);
+		glm::vec2 max = glm::max(m_cloudGenData.localDrift, cameraXZPos);
+
+		glm::vec2 overlappingMin = max - glm::vec2(viewDistance);
+		glm::vec2 overlappingMax = min + glm::vec2(viewDistance);
+
+		for (float x = -viewDistance + cameraXZPos.x; x <= viewDistance + cameraXZPos.x; x += m_cloudGenData.sampleDistance)
+		{
+			for (float z = -viewDistance + cameraXZPos.y; z <= viewDistance + cameraXZPos.y; z += m_cloudGenData.sampleDistance)
+			{
+				if (x >= overlappingMin.x && x <= overlappingMax.x && z >= overlappingMin.y && z <= overlappingMax.y)
+					continue;
+
+				sampleCloud(x - m_cloudGenData.globalDrift.x, z - m_cloudGenData.globalDrift.y);
+			}
+		}
+	}
+
+	void World::clearDistanceClouds(const Camera& camera)
+	{
+		float viewDistance = (float)m_cloudGenData.chunkVisiblityDistance * CHUNK_WIDTH;
+		glm::vec3 globalDriftVec3 = glm::vec3(m_cloudGenData.globalDrift.x, 0, m_cloudGenData.globalDrift.y);
+
+		for (int32_t i = (int32_t)m_cloudGenData.cloudList.size() - 1; i >= 0; i--)
+		{
+			glm::vec3 cloudGlobalPos = m_cloudGenData.cloudList[i] + globalDriftVec3;
+			glm::vec3 camToCloud = glm::abs(cloudGlobalPos - camera.transform.position);
+
+			if (camToCloud.x > viewDistance || camToCloud.z > viewDistance)
+			{
+				m_cloudGenData.cloudList.erase(m_cloudGenData.cloudList.begin() + i);
+			}
+		}
+	}
+
+	void World::sampleCloud(float x, float z)
+	{
+		float cloudNoise = Noise::samplePerlin2D_zeroOne(x, z, m_cloudGenData.cloudNoise);
+		float maskNoise = Noise::samplePerlin2D_zeroOne(x, z, m_cloudGenData.maskNoise);
+		float finalNoise = cloudNoise * maskNoise;
+
+		float cloudHeight = finalNoise * m_cloudGenData.height;
+
+		float currentHeight = 0.f;
+		while (currentHeight < cloudHeight)
+		{
+			uint32_t seed = uint32_t(finalNoise * UINT_MAX + currentHeight);
+
+			glm::vec3 placementOffset = glm::vec3(
+				Random::randomFloat(seed) * 2.f - 1.f,
+				(Random::randomFloat(seed) * 2.f - 1.f) * 0.5f,
+				Random::randomFloat(seed) * 2.f - 1.f);
+
+			placementOffset = glm::normalize(placementOffset) * m_cloudGenData.maxOffset * Random::randomFloat(seed);
+			glm::vec3 cloudPoint = glm::vec3(x, m_cloudGenData.spawnHeight + currentHeight, z);
+
+			m_cloudGenData.cloudList.emplace_back(cloudPoint + placementOffset);
+			currentHeight += m_cloudGenData.sampleDistance;
+		}
+	}
+
+	const std::vector<glm::vec3>& World::getCloudList() const
+	{
+		return m_cloudGenData.cloudList;
+	}
+
 	Chunk& World::getChunk(ChunkID chunkID)
 	{
 		return m_loadedChunks[chunkID];
@@ -305,7 +419,7 @@ namespace Okay
 
 	void World::tryLoadRenderEligableChunks(const Camera& camera)
 	{
-		for (int i = 0; i < RENDER_DISTNACE; i++)
+		for (int i = 0; i < (int)m_renderDistance; i++)
 		{
 			uint32_t loadedChunks = 0;
 			uint32_t totalChunks = 0;
@@ -346,7 +460,7 @@ namespace Okay
 	{
 		glm::vec2 chunkMiddle = glm::vec2(chunkIDToChunkCoord(chunkID));
 		glm::vec2 camChunkMiddle = glm::vec2(m_currentCamChunkCoord);
-		return glm::length2(chunkMiddle - camChunkMiddle) < RENDER_DISTNACE * RENDER_DISTNACE; // wrong lmao
+		return glm::length2(chunkMiddle - camChunkMiddle) <= m_renderDistance * m_renderDistance;
 	}
 
 	bool World::isChunkLoading(ChunkID chunkID) const

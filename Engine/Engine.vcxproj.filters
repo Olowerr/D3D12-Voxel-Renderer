@@ -111,6 +111,9 @@
     <ClInclude Include="Source\Engine\World\Structure.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Engine\Utilities\Random.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Engine\Application\Application.cpp">

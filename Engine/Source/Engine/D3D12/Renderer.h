@@ -168,11 +168,12 @@ namespace Okay
 	private:
 		void updateBuffers(const World& world, const Camera& camera);
 		void preRender();
-		void renderWorld();
+		void renderWorld(const World& world);
 		void postRender();
 
 		void drawGPUMeshInfo(const DXChunk& dxChunk, const GPUMeshInfo& gpuMeshInfo);
 		void drawSkyBox();
+		void drawClouds(const World& world);
 
 		void signal(ID3D12Fence* pFence, uint64_t& fenceValue);
 		void execute(ID3D12GraphicsCommandList* pCommandList);
@@ -230,6 +231,7 @@ namespace Okay
 
 		void createVoxelRenderPass();
 		void createSkyboxRenderPass();
+		void createCloudsRenderPass();
 
 	private:
 		ThreadPool m_threadPool;
@@ -251,6 +253,9 @@ namespace Okay
 
 		ID3D12RootSignature* m_pSkyBoxRootSignature = nullptr;
 		ID3D12PipelineState* m_pSkyBoxPSO = nullptr;
+
+		ID3D12RootSignature* m_pCloudsRootSignature = nullptr;
+		ID3D12PipelineState* m_pCloudsPSO = nullptr;
 
 		D3D12_GPU_VIRTUAL_ADDRESS m_renderDataGVA = INVALID_UINT64;
 

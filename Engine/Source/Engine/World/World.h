@@ -19,6 +19,29 @@ namespace Okay
 		Chunk chunk;
 	};
 
+	struct CloudGenerationData
+	{
+		static const float UPDATE_INTERVAL;
+		float updateTimer = UPDATE_INTERVAL;
+
+		std::vector<glm::vec3> cloudList;
+
+		Noise::SamplingData cloudNoise;
+		Noise::SamplingData maskNoise;
+
+		glm::vec2 velocity = glm::vec2(1.f, 1.f);
+		glm::vec2 localDrift = glm::vec2(FLT_MAX);
+		glm::vec2 globalDrift = glm::vec2(0.f);
+
+		uint32_t spawnHeight = 200;
+		float scale = 9.f;
+		float height = 100.f;
+		float maxOffset = 6.f;
+		float sampleDistance = 8.f;
+		uint32_t chunkVisiblityDistance = 32;
+		glm::vec4 colour = glm::vec4(248.f, 255.f, 255.f, 95.f) / (float)UCHAR_MAX;
+	};
+
 	struct WorldGenerationData
 	{
 		uint32_t seed = 0;
@@ -48,7 +71,7 @@ namespace Okay
 		void initialize();
 		void shutdown();
 
-		void update(const Camera& camera);
+		void update(const Camera& camera, TimeStep dt);
 
 		BlockType getBlockAtBlockCoord(const glm::ivec3& blockCoord) const;
 		BlockType tryGetBlock(ChunkID chunkID, uint32_t blockIdx) const;
@@ -67,7 +90,13 @@ namespace Okay
 
 		void applySeed() const;
 		void resetWorld();
+
+		void recreateClouds();
+		const std::vector<glm::vec3>& getCloudList() const;
+
 		WorldGenerationData m_worldGenData;
+		CloudGenerationData m_cloudGenData;
+		uint32_t m_renderDistance = 32;
 
 	private:
 		void launchChunkGenerationThread(ChunkID chunkID);
@@ -88,6 +117,11 @@ namespace Okay
 		bool isChunkLoading(ChunkID chunkID) const;
 
 		bool isChunkInView(const Camera& camera, ChunkID chunkID) const;
+
+		void updateClouds(const Camera& camera, TimeStep dt);
+		void generateCloudList(const Camera& camera);
+		void clearDistanceClouds(const Camera& camera);
+		void sampleCloud(float x, float z);
 
 	private:
 		ThreadPool m_threadPool;

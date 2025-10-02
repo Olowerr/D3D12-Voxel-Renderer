@@ -13,6 +13,7 @@ namespace Okay
 			float frequencyDenominator = 1.f;
 			float persistence = 0.5f;
 			float exponent = 1.f;
+			float cutOff = 0.f;
 		};
 
 		void applyPerlinSeed(uint32_t seed);

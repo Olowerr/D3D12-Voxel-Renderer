@@ -48,7 +48,7 @@ namespace Okay
 			onUpdate(timeStep);
 			m_camera.frustum = Collision::createFrustumFromCamera(m_camera);
 
-			m_world.update(m_camera);
+			m_world.update(m_camera, timeStep);
 			m_renderer.render(m_world, m_camera);
 		}
 	}

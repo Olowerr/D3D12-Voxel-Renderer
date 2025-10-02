@@ -1,69 +1,13 @@
 #include "GPUShared.hlsli"
-
-static const float4 CUBE[] =
-{
-    float4(-0.5, 0.5, -0.5, 1),
-    float4(-0.5, 0.5, 0.5, 1),
-    float4( 0.5, 0.5, 0.5, 1),
-
-    float4(0.5, 0.5, 0.5, 1),
-    float4(0.5, 0.5, -0.5, 1),
-    float4(-0.5, 0.5, -0.5, 1),
-
-
-    float4(0.5, -0.5, 0.5, 1),
-    float4(-0.5, -0.5, 0.5, 1),
-    float4(-0.5, -0.5, -0.5, 1),
-
-    float4(-0.5, -0.5, -0.5, 1),
-    float4(0.5, -0.5, -0.5, 1),
-    float4(0.5, -0.5, 0.5, 1),
-
-
-    float4(0.5, 0.5, -0.5, 1),
-    float4(0.5, 0.5, 0.5, 1),
-    float4(0.5, -0.5, 0.5, 1),
-
-    float4(0.5, 0.5, -0.5, 1),
-    float4(0.5, -0.5, 0.5, 1),
-    float4(0.5, -0.5, -0.5, 1),
-
-
-    float4(-0.5, -0.5, 0.5, 1),
-    float4(-0.5, 0.5, 0.5, 1),
-    float4(-0.5, 0.5, -0.5, 1),
-
-    float4(-0.5, -0.5, -0.5, 1),
-    float4(-0.5, -0.5, 0.5, 1),
-    float4(-0.5, 0.5, -0.5, 1),
-
-
-    float4(0.5, 0.5, 0.5, 1),
-    float4(-0.5, 0.5, 0.5, 1),
-    float4(-0.5, -0.5, 0.5, 1),
-
-    float4(-0.5, -0.5, 0.5, 1),
-    float4(0.5, -0.5, 0.5, 1),
-    float4(0.5, 0.5, 0.5, 1),
-
-
-    float4(-0.5, -0.5, -0.5, 1),
-    float4(-0.5, 0.5, -0.5, 1),
-    float4(0.5, 0.5, -0.5, 1),
-
-    float4(0.5, 0.5, -0.5, 1),
-    float4(0.5, -0.5, -0.5, 1),
-    float4(-0.5, -0.5, -0.5, 1),
-
-};
+#include "CubeVerticies.hlsli"
 
 SkyBoxVSOutput main(uint vertexID : SV_VertexID)
 {
     SkyBoxVSOutput output;
-    float4 vertexPos = CUBE[vertexID];
+    float3 vertexPos = CUBE_VERTICIES[vertexID];
     
     output.localPos = vertexPos.xyz;
-    output.svPosition = mul(vertexPos + float4(renderCB.cameraPos, 0.f), renderCB.viewProjMatrix).xyww;
+    output.svPosition = mul(float4(vertexPos + renderCB.cameraPos, 1.f), renderCB.viewProjMatrix).xyww;
     
 	return output;
 }

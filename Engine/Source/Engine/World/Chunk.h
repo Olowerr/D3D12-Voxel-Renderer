@@ -17,11 +17,7 @@ namespace Okay
 
 	struct Chunk // Chunk block coordinate system order: X -> Y -> Z
 	{
-		Chunk()
-		{
-			for (BlockType& block : blocks)
-				block = BlockType::AIR;
-		}
+		Chunk() = default;
 		BlockType blocks[MAX_BLOCKS_IN_CHUNK] = {};
 	};
 

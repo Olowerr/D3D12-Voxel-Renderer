@@ -42,6 +42,7 @@
     <ClInclude Include="Source\Engine\Okay.h" />
     <ClInclude Include="Source\Engine\Utilities\Collision.h" />
     <ClInclude Include="Source\Engine\Utilities\Noise.h" />
+    <ClInclude Include="Source\Engine\Utilities\Random.h" />
     <ClInclude Include="Source\Engine\Utilities\ThreadPool.h" />
     <ClInclude Include="Source\Engine\Utilities\InterpolationList.h" />
     <ClInclude Include="Source\Engine\World\Blocks.h" />

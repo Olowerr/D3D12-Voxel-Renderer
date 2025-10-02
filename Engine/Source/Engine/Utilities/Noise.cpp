@@ -14,6 +14,11 @@ namespace Okay
 			y *= frequency;
 
 			float noise = db::perlin_octave2D(x, y, samplingData.numOctaves, samplingData.persistence);
+			noise = noise * 0.5f + 0.5f;
+
+			noise = noise >= samplingData.cutOff ? ((noise - samplingData.cutOff) / (1.f - samplingData.cutOff)) : 0.f;
+			noise = glm::pow(noise, samplingData.exponent);
+
 			return noise;
 		}
 
@@ -25,7 +30,7 @@ namespace Okay
 		float samplePerlin2D_minusOneOne(float x, float y, const SamplingData& samplingData)
 		{
 			float noise = samplePerlin_Internal(x, y, samplingData);
-			noise = glm::pow(noise, samplingData.exponent);
+			noise = noise * 2.f - 1.f;
 
 			return noise;
 		}
@@ -33,10 +38,6 @@ namespace Okay
 		float samplePerlin2D_zeroOne(float x, float y, const SamplingData& samplingData)
 		{
 			float noise = samplePerlin_Internal(x, y, samplingData);
-			noise = noise * 0.5f + 0.5f;
-
-			noise = glm::pow(noise, samplingData.exponent);
-
 			return noise;
 		}
 	}

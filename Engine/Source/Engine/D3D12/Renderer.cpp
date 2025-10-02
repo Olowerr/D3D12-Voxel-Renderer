@@ -21,6 +21,13 @@ namespace Okay
 		float padding1;
 	};
 	
+	struct GPUCloudsRenderData
+	{
+		glm::vec4 colour = glm::vec4(1.f);
+		glm::vec3 offset = glm::vec3(0.f);
+		float scale = 1.f;
+	};
+	
 	struct GPUDrawCallData
 	{
 		glm::vec3 chunkWorldPos = glm::vec3(0.f);
@@ -59,6 +66,7 @@ namespace Okay
 
 		createVoxelRenderPass();
 		createSkyboxRenderPass();
+		createCloudsRenderPass();
 
 		m_gpuVertexData.initialize(m_pDevice, 1'000'000, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 		m_gpuIndicesData.initialize(m_pDevice, 1'000'000, D3D12_RESOURCE_STATE_INDEX_BUFFER);
@@ -102,6 +110,9 @@ namespace Okay
 
 		D3D12_RELEASE(m_pSkyBoxRootSignature);
 		D3D12_RELEASE(m_pSkyBoxPSO);
+
+		D3D12_RELEASE(m_pCloudsRootSignature);
+		D3D12_RELEASE(m_pCloudsPSO);
 
 		D3D12_RELEASE(m_pRTVDescHeap);
 		D3D12_RELEASE(m_pDSVDescHeap);
@@ -165,7 +176,7 @@ namespace Okay
 
 		updateBuffers(world, camera);
 		preRender();
-		renderWorld();
+		renderWorld(world);
 		postRender();
 
 		frame.ringBuffer.unmap();
@@ -196,7 +207,7 @@ namespace Okay
 		frame.pCommandList->ClearDepthStencilView(frame.cpuDepthTextureDSV, D3D12_CLEAR_FLAG_DEPTH, 1.f, 0, 0, nullptr);
 	}
 
-	void Renderer::renderWorld()
+	void Renderer::renderWorld(const World& world)
 	{
 		FrameResources& frame = getCurrentFrameResorces();
 
@@ -230,6 +241,7 @@ namespace Okay
 		}
 
 		drawSkyBox();
+		drawClouds(world);
 	}
 
 	void Renderer::postRender()
@@ -271,6 +283,31 @@ namespace Okay
 		frame.pCommandList->SetGraphicsRootConstantBufferView(0, m_renderDataGVA);
 
 		frame.pCommandList->DrawInstanced(36, 1, 0, 0);
+	}
+
+	void Renderer::drawClouds(const World& world)
+	{
+		// Function assumes the correct RTV, viewport, etc are already bound
+
+		FrameResources& frame = getCurrentFrameResorces();
+
+		const std::vector<glm::vec3>& cloudList = world.getCloudList();
+		D3D12_GPU_VIRTUAL_ADDRESS cloudPointsGVA = frame.ringBuffer.allocate(cloudList.data(), cloudList.size() * sizeof(glm::vec3));
+
+		GPUCloudsRenderData cloudRenderData = {};
+		cloudRenderData.colour = world.m_cloudGenData.colour;
+		cloudRenderData.offset = glm::vec3(world.m_cloudGenData.globalDrift.x, 0.f, world.m_cloudGenData.globalDrift.y);
+		cloudRenderData.scale = world.m_cloudGenData.scale;
+
+		D3D12_GPU_VIRTUAL_ADDRESS cloudsRenderDataGVA = frame.ringBuffer.allocate(&cloudRenderData, sizeof(GPUCloudsRenderData));
+
+		frame.pCommandList->SetGraphicsRootSignature(m_pCloudsRootSignature);
+		frame.pCommandList->SetPipelineState(m_pCloudsPSO);
+		frame.pCommandList->SetGraphicsRootConstantBufferView(0, m_renderDataGVA);
+		frame.pCommandList->SetGraphicsRootShaderResourceView(1, cloudPointsGVA);
+		frame.pCommandList->SetGraphicsRootConstantBufferView(2, cloudsRenderDataGVA);
+
+		frame.pCommandList->DrawInstanced(36, (uint32_t)cloudList.size(), 0, 0);
 	}
 
 	void Renderer::signal(ID3D12Fence* pFence, uint64_t& fenceValue)
@@ -1432,6 +1469,48 @@ namespace Okay
 		pipelineDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
 
 		DX_CHECK(m_pDevice->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_pSkyBoxPSO)));
+
+		for (ID3DBlob*& pBlob : pShaderBlobs)
+			D3D12_RELEASE(pBlob);
+	}
+
+	void Renderer::createCloudsRenderPass()
+	{
+		ID3DBlob* pShaderBlobs[5] = {};
+		uint32_t shaderBlobIdx = 0;
+
+		D3D12_ROOT_PARAMETER rootParams[] = 
+		{
+			createRootParamCBV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0), // RenderData
+			createRootParamSRV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0),  // CloudData list
+			createRootParamCBV(D3D12_SHADER_VISIBILITY_VERTEX, 1, 0),  // CloudRenderData
+		};
+
+		D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
+		rootDesc.NumParameters = _countof(rootParams);
+		rootDesc.pParameters = rootParams;
+		rootDesc.NumStaticSamplers = 0;
+		rootDesc.pStaticSamplers = nullptr;
+		rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+		m_pCloudsRootSignature = createRootSignature(&rootDesc, L"CloudsRootSignature");
+
+		D3D12_GRAPHICS_PIPELINE_STATE_DESC pipelineDesc = createDefaultGraphicsPipelineStateDesc();
+		pipelineDesc.pRootSignature = m_pCloudsRootSignature;
+		pipelineDesc.VS = compileShader(SHADER_PATH / "CloudsVS.hlsl", "vs_5_1", &pShaderBlobs[shaderBlobIdx++]);
+		pipelineDesc.PS = compileShader(SHADER_PATH / "CloudsPS.hlsl", "ps_5_1", &pShaderBlobs[shaderBlobIdx++]);
+		pipelineDesc.NumRenderTargets = 1;
+		pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+		pipelineDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+
+		pipelineDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+
+		pipelineDesc.BlendState.RenderTarget[0].BlendEnable = TRUE;
+		pipelineDesc.BlendState.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+		pipelineDesc.BlendState.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+		pipelineDesc.BlendState.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+		pipelineDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+
+		DX_CHECK(m_pDevice->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_pCloudsPSO)));
 
 		for (ID3DBlob*& pBlob : pShaderBlobs)
 			D3D12_RELEASE(pBlob);
