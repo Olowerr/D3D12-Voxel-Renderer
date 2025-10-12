@@ -75,6 +75,8 @@ namespace Okay
 
 		BlockType getBlockAtBlockCoord(const glm::ivec3& blockCoord) const;
 		BlockType tryGetBlock(ChunkID chunkID, uint32_t blockIdx) const;
+
+		static bool isBlockTypeSolid(BlockType block);
 		bool isBlockCoordSolid(const glm::ivec3& blockCoord) const;
 
 		BlockType generateBlock(const glm::ivec3& blockCoord);

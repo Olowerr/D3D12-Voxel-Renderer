@@ -95,6 +95,12 @@ namespace Okay
 		return pChunk ? pChunk->blocks[blockIdx] : BlockType::INVALID;
 	}
 
+	bool World::isBlockTypeSolid(BlockType block)
+	{
+		// TODO: Improve this lamo
+		return block != BlockType::AIR && block != BlockType::WATER && block != BlockType::OAK_LEAVES;
+	}
+
 	bool World::isBlockCoordSolid(const glm::ivec3& blockCoord) const
 	{
 		if (blockCoord.y < 0 || blockCoord.y >= WORLD_HEIGHT)
@@ -104,7 +110,7 @@ namespace Okay
 		uint32_t chunkBlockIdx = chunkBlockCoordToChunkBlockIdx(chunkBlockCoord);
 
 		BlockType block = tryGetBlock(blockCoordToChunkID(blockCoord), chunkBlockIdx);
-		return block != BlockType::AIR && block != BlockType::WATER && block != BlockType::OAK_LEAVES;
+		return isBlockTypeSolid(block);
 	}
 
 	bool World::shouldPlaceTree(const glm::ivec3& blockCoord) const
@@ -195,7 +201,7 @@ namespace Okay
 			}
 		}
 
-		return BlockType::INVALID;
+		return BlockType::AIR;
 	}
 
 	uint32_t World::findColoumnHeight(const glm::ivec3& blockCoordXZ)
@@ -221,8 +227,8 @@ namespace Okay
 		if (blockCoord.y >= stoneHeight && blockCoord.y < columnHeight)
 		{
 			bool belowGround = blockCoord.y < columnHeight - 1;
-			bool structureAbove = tryFindStructureBlock(blockCoord + glm::ivec3(0, 1, 0)) != BlockType::INVALID;
-			return belowGround || structureAbove ? BlockType::DIRT : BlockType::GRASS;
+			BlockType structBlockAbove = tryFindStructureBlock(blockCoord + glm::ivec3(0, 1, 0));
+			return isBlockTypeSolid(structBlockAbove) || belowGround ? BlockType::DIRT : BlockType::GRASS;
 		}
 		
 		if (blockCoord.y >= columnHeight && blockCoord.y < (int)m_worldGenData.oceanHeight)
@@ -511,6 +517,12 @@ namespace Okay
 			{
 				ChunkID adjacentChunkID = chunkCoordToChunkID(chunkCoord + glm::ivec2(offsetX, offsetZ));
 				loadChunkStructures(adjacentChunkID);
+
+				/*
+					Structure loading like this is problematic cuz
+					the same structure is stored multiple times due to how loadChunkStructures is called
+						(function called multiple times for the same chunk)
+				*/
 			}
 		}
 
