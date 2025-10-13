@@ -532,12 +532,6 @@ namespace Okay
 			{
 				ChunkID adjacentChunkID = chunkCoordToChunkID(chunkCoord + glm::ivec2(offsetX, offsetZ));
 				loadChunkStructures(adjacentChunkID);
-
-				/*
-					Structure loading like this is problematic cuz
-					the same structure is stored multiple times due to how loadChunkStructures is called
-						(function called multiple times for the same chunk)
-				*/
 			}
 		}
 
