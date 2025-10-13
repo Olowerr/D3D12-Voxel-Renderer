@@ -16,11 +16,19 @@ namespace Okay
 	struct Structure
 	{
 		Structure() = default;
+		Structure(StructureType type, const glm::ivec3& minBounds, const glm::ivec3& maxBounds)
+			:type(type), worldBoundsMin(minBounds), worldBoundsMax(maxBounds)
+		{ }
 
 		inline bool isWithinBounds(const glm::ivec3& blockCoord) const
 		{
 			return blockCoord.x >= worldBoundsMin.x && blockCoord.y >= worldBoundsMin.y && blockCoord.z >= worldBoundsMin.z &&
 				blockCoord.x <= worldBoundsMax.x && blockCoord.y <= worldBoundsMax.y && blockCoord.z <= worldBoundsMax.z;
+		}
+
+		bool operator==(const Structure& other) const
+		{
+			return type == other.type && worldBoundsMin == other.worldBoundsMin && worldBoundsMax == other.worldBoundsMax;
 		}
 
 		StructureType type = StructureType::NONE;

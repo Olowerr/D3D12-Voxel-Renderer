@@ -148,6 +148,21 @@ namespace Okay
 
 				// vec division in glm is defined as: vec * (1 / scalar), so the result is always 0 when using interger types and the scalar > 1 .-.
 				glm::ivec3 halfXZMaxBounds = (glm::vec3)glm::ivec3(treeDesc.boundsMax.x, 0, treeDesc.boundsMax.z) / 2.f;
+				glm::ivec3 minBounds = blockCoord - halfXZMaxBounds;
+				glm::ivec3 maxBounds = (blockCoord + treeDesc.boundsMax) - halfXZMaxBounds;
+
+				bool loaded = false;
+				for (const Structure& structure : chunkStructures.structures)
+				{
+					if (structure == Structure(StructureType::TREE, minBounds, maxBounds))
+					{
+						loaded = true;
+						break;
+					}
+				}
+
+				if (loaded)
+					continue;
 
 				chunkStructures.structures[nextIdx].type = StructureType::TREE;
 				chunkStructures.structures[nextIdx].worldBoundsMin = blockCoord - halfXZMaxBounds;
