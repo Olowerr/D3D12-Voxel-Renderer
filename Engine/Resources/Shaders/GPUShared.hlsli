@@ -27,6 +27,7 @@ struct DrawCallData
 struct VoxelVSOutput
 {
     float4 svPosition : SV_POSITION;
+    float3 worldPos : WORLD_POS;
     float2 uv : UV;
     uint sideIdx : SIDE_IDX;
 };
@@ -63,9 +64,15 @@ struct Vertex
 
 ConstantBuffer<RenderData> renderCB : register(b0, space0);
 ConstantBuffer<DrawCallData> drawCB : register(b1, space0);
+
 StructuredBuffer<Vertex> verticies : register(t0, space0);
 Texture2D<float4> textureSheet : register(t1, space0);
+Texture2D gBuffers[3] : register(t2, space1);
+
+RWTexture2D<float4> backBuffer : register(u0, space0);
+
 SamplerState pointSampler : register(s0, space0);
+
 
 float2 calculateUVCoords(float2 globalUV, uint textureID)
 {

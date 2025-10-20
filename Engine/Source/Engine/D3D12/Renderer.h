@@ -1,6 +1,7 @@
 #pragma once
 #include "RingBuffer.h"
 #include "ResourceArena.h"
+#include "DescriptorHeap.h"
 #include "Engine/World/Chunk.h"
 #include "Engine/Utilities/ThreadPool.h"
 
@@ -10,6 +11,7 @@ namespace Okay
 {
 	constexpr uint32_t TEXTURE_SHEET_TILE_SIZE = 16;
 	constexpr uint32_t TEXTURE_SHEET_PADDING = 8;
+	constexpr uint32_t RENDER_TARGETS = 3;
 
 	class Window;
 	class World;
@@ -24,8 +26,15 @@ namespace Okay
 		ID3D12CommandAllocator* pCommandAllocator = nullptr;
 		ID3D12GraphicsCommandList* pCommandList = nullptr;
 
+		ID3D12Resource* pGBuffers[RENDER_TARGETS] = {};
+		D3D12_CPU_DESCRIPTOR_HANDLE gBufferRTVs[RENDER_TARGETS] = {};
+		D3D12_GPU_DESCRIPTOR_HANDLE gBufferSRVs[RENDER_TARGETS] = {};
+
 		ID3D12Resource* pBackBuffer = nullptr;
-		D3D12_CPU_DESCRIPTOR_HANDLE cpuBackBufferRTV = {};
+
+		ID3D12Resource* pMainBuffer = nullptr;
+		D3D12_CPU_DESCRIPTOR_HANDLE mainBufferRTV = {};
+		D3D12_GPU_DESCRIPTOR_HANDLE mainBufferUAV = {};
 
 		ID3D12Resource* pDepthTexture = nullptr;
 		D3D12_CPU_DESCRIPTOR_HANDLE cpuDepthTextureDSV = {};
@@ -148,6 +157,42 @@ namespace Okay
 		uint8_t sideIDs[3] = {};
 	};
 
+	enum struct RenderPassType
+	{
+		None = 0,
+		Graphic,
+		Compute,
+	};
+
+	struct RenderPassSpecification // C:<
+	{
+		RenderPassSpecification() = default;
+		RenderPassSpecification(RenderPassType type)
+			:type(type)
+		{
+		}
+
+		RenderPassType type = RenderPassType::None;
+		std::wstring_view dbgName;
+
+		union
+		{
+			D3D12_GRAPHICS_PIPELINE_STATE_DESC graphicsDesc = {};
+			D3D12_COMPUTE_PIPELINE_STATE_DESC computeDesc;
+		};
+
+		FilePath vsPath;
+		FilePath hsPath;
+		FilePath dsPath;
+		FilePath gsPath;
+		FilePath psPath;
+
+		FilePath csPath;
+
+		std::vector<D3D12_ROOT_PARAMETER> rootParams;
+		std::vector<D3D12_STATIC_SAMPLER_DESC> staticSamplers;
+	};
+
 	class Renderer
 	{
 	public:
@@ -198,11 +243,6 @@ namespace Okay
 		void addBlockMeshData(const World* pWorld, BlockType block, const glm::ivec3& chunkBlockCoord, const glm::ivec3& worldBlockCoord, MeshData& outMeshData);
 		void addWaterMeshData(const World* pWorld, const glm::ivec3& chunkBlockCoord, const glm::ivec3& worldBlockCoord, MeshData& outMeshData);
 
-		D3D12_CPU_DESCRIPTOR_HANDLE createRTVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc);
-		D3D12_CPU_DESCRIPTOR_HANDLE createDSVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_DEPTH_STENCIL_VIEW_DESC* pDesc);
-		D3D12_GPU_DESCRIPTOR_HANDLE createSRVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_SHADER_RESOURCE_VIEW_DESC* pDesc);
-		D3D12_GPU_DESCRIPTOR_HANDLE createUAVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_UNORDERED_ACCESS_VIEW_DESC* pDesc);
-
 		D3D12_GPU_VIRTUAL_ADDRESS allocateIntoResourceArena(ResourceArena& arena, ResourceSlot* pOutSlot, const void* pData, uint64_t dataSize);
 
 		FrameResources& getCurrentFrameResorces();
@@ -219,9 +259,9 @@ namespace Okay
 		void shutdowFrameResources(FrameResources& frame);
 		void updateBackBufferTextures();
 
+		ID3D12Resource* createGBuffer(uint32_t width, uint32_t height, DXGI_FORMAT format, std::wstring_view name);
 
 		ID3D12RootSignature* createRootSignature(const D3D12_ROOT_SIGNATURE_DESC* pDesc, std::wstring_view name);
-		ID3D12DescriptorHeap* createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors, bool shaderVisible, std::wstring_view name);
 		ID3D12Resource* createCommittedBuffer(uint64_t size, D3D12_RESOURCE_STATES initialState, D3D12_HEAP_TYPE heapType, std::wstring_view name);
 
 		ID3D12Resource* createTextureSheet(FrameResources& frame);
@@ -233,6 +273,8 @@ namespace Okay
 		void createSkyboxRenderPass();
 		void createCloudsRenderPass();
 
+		void createRenderPass(const RenderPassSpecification& spec, ID3D12RootSignature** ppOutRS, ID3D12PipelineState** ppOutPSO);
+
 	private:
 		ThreadPool m_threadPool;
 
@@ -243,13 +285,16 @@ namespace Okay
 		FrameResources m_frames[MAX_FRAMES_IN_FLIGHT] = {};
 		std::vector<FrameGarbage> m_frameGarbage;
 
-		ID3D12DescriptorHeap* m_pRTVDescHeap = nullptr;
-		ID3D12DescriptorHeap* m_pDSVDescHeap = nullptr;
-		ID3D12DescriptorHeap* m_pTextureDescHeap = nullptr;
+		DescriptorHeap m_RTVDescriptorHeap;
+		DescriptorHeap m_DSVDescriptorHeap;
+		DescriptorHeap m_SRVUAVDescriptorHeap;
 
 		ID3D12RootSignature* m_pVoxelRootSignature = nullptr;
 		ID3D12PipelineState* m_pVoxelPSO = nullptr;
 		ID3D12PipelineState* m_pWaterPSO = nullptr;
+		
+		ID3D12RootSignature* m_pLightPassRootSignature = nullptr;
+		ID3D12PipelineState* m_pLightVoxelPSO = nullptr;
 
 		ID3D12RootSignature* m_pSkyBoxRootSignature = nullptr;
 		ID3D12PipelineState* m_pSkyBoxPSO = nullptr;
@@ -266,7 +311,7 @@ namespace Okay
 		ResourceArena m_gpuIndicesData;
 
 		ID3D12Resource* m_pTextureSheet = nullptr;
-		D3D12_GPU_DESCRIPTOR_HANDLE m_textureHandle = {};
+		D3D12_GPU_DESCRIPTOR_HANDLE m_textureSheetHandle = {};
 
 		// can maybe be vector instead? idx 0 is air tho but 3-6 extra bytes don't really matter
 		std::unordered_map<BlockType, SideTextureIDs> m_textureIds;
@@ -276,6 +321,6 @@ namespace Okay
 		uint32_t m_dsvIncrementSize = INVALID_UINT32;
 		uint32_t m_cbvSrvUavIncrementSize = INVALID_UINT32;
 
-		ID3D12DescriptorHeap* m_pImguiDescriptorHeap = nullptr;
+		DescriptorHeap m_imguiDescriptorHeap;
 	};
 }

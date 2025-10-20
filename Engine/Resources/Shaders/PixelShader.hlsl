@@ -1,14 +1,23 @@
 
 #include "GPUShared.hlsli"
 
-float4 main(VoxelVSOutput input) : SV_TARGET
+struct RenderTargets
+{
+    float4 diffuse : SV_TARGET0;
+    float4 worldPos : SV_TARGET1;
+    float4 normal : SV_TARGET2;
+};
+
+RenderTargets main(VoxelVSOutput input)
 {
     float4 textureColor = textureSheet.Sample(pointSampler, input.uv);
     if (round(textureColor.a) == 0.f)
         discard;
     
-    float3 SUN_DIR = -normalize(float3(-0.469, -0.820, -0.327));
-   
-    float lightIntensity = max(dot(SUN_DIR, SIDE_NORMALS[input.sideIdx]), 0.3f) * 1.2f;
-    return float4(textureColor.rgb * lightIntensity, 0.f);
+    RenderTargets output;
+    output.diffuse = textureColor;
+    output.worldPos = float4(input.worldPos, 0.f);
+    output.normal = float4(SIDE_NORMALS[input.sideIdx], 0.f);
+    
+    return output;
 }

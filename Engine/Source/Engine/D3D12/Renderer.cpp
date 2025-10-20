@@ -48,9 +48,9 @@ namespace Okay
 		createDevice(pFactory);
 		createCommandQueue();
 
-		m_pRTVDescHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_RTV, MAX_FRAMES_IN_FLIGHT, false, L"BackBufferRTVDescriptorHeap");
-		m_pDSVDescHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_DSV, MAX_FRAMES_IN_FLIGHT, false, L"DepthTextureDSVDescriptorHeap");
-		m_pTextureDescHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, true, L"TexturesSRVDescriptorHeap");
+		m_RTVDescriptorHeap.initialize(m_pDevice, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 20, false, L"RTVDescriptorHeap");
+		m_DSVDescriptorHeap.initialize(m_pDevice, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 20, false, L"DepthTextureDSVDescriptorHeap");
+		m_SRVUAVDescriptorHeap.initialize(m_pDevice, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 20, true, L"TexturesSRVDescriptorHeap");
 
 		m_rtvIncrementSize = m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 		m_dsvIncrementSize = m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
@@ -76,7 +76,7 @@ namespace Okay
 		reset(initFrame.pCommandAllocator, initFrame.pCommandList);
 
 		m_pTextureSheet = createTextureSheet(initFrame);
-		m_textureHandle = createSRVDescriptor(m_pTextureDescHeap, 0, m_pTextureSheet, nullptr);
+		m_textureSheetHandle = m_SRVUAVDescriptorHeap.createSRVDescriptor(0, m_pTextureSheet, nullptr);
 
 		flush(initFrame.pCommandList, initFrame.pCommandAllocator, initFrame.pFence, initFrame.fenceValue);
 		shutdowFrameResources(initFrame);
@@ -87,18 +87,21 @@ namespace Okay
 		m_threadPool.initialize(numThreads);
 
 		// In this version of Imgui, only 1 SRV is needed, it's stated that future versions will need more, but I don't see a reason to switch version atm :]
-		m_pImguiDescriptorHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, true, L"Imgui");
-		imguiInitialize(window, m_pDevice, m_pCommandQueue, m_pImguiDescriptorHeap, MAX_FRAMES_IN_FLIGHT);
+		m_imguiDescriptorHeap.initialize(m_pDevice, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, true, L"Imgui");
+		imguiInitialize(window, m_pDevice, m_pCommandQueue, m_imguiDescriptorHeap.getD3D12DescriptorHeap(), MAX_FRAMES_IN_FLIGHT);
 	}
 
 	void Renderer::shutdown()
 	{
+		ID3D12DebugDevice* pDebugDevice = nullptr;
+		DX_CHECK(m_pDevice->QueryInterface<ID3D12DebugDevice>(&pDebugDevice));
+
 		for (FrameResources& frame : m_frames)
 			shutdowFrameResources(frame);
 
 		for (FrameGarbage& frameGarbage : m_frameGarbage)
 			D3D12_RELEASE(frameGarbage.pDxUnknown);
-
+		
 		D3D12_RELEASE(m_pDevice);
 		D3D12_RELEASE(m_pCommandQueue);
 		D3D12_RELEASE(m_pSwapChain);
@@ -106,43 +109,51 @@ namespace Okay
 		D3D12_RELEASE(m_pVoxelRootSignature);
 		D3D12_RELEASE(m_pVoxelPSO);
 		D3D12_RELEASE(m_pWaterPSO);
-		D3D12_RELEASE(m_pTextureSheet);
-
+		D3D12_RELEASE(m_pLightPassRootSignature);
+		D3D12_RELEASE(m_pLightVoxelPSO);
 		D3D12_RELEASE(m_pSkyBoxRootSignature);
 		D3D12_RELEASE(m_pSkyBoxPSO);
-
 		D3D12_RELEASE(m_pCloudsRootSignature);
 		D3D12_RELEASE(m_pCloudsPSO);
 
-		D3D12_RELEASE(m_pRTVDescHeap);
-		D3D12_RELEASE(m_pDSVDescHeap);
-		D3D12_RELEASE(m_pTextureDescHeap);
+		D3D12_RELEASE(m_pTextureSheet);
+
+		m_RTVDescriptorHeap.shutdown();
+		m_DSVDescriptorHeap.shutdown();
+		m_SRVUAVDescriptorHeap.shutdown();
 
 		m_gpuVertexData.shutdown();
 		m_gpuIndicesData.shutdown();
 		m_threadPool.shutdown();
 
-		D3D12_RELEASE(m_pImguiDescriptorHeap);
+		m_imguiDescriptorHeap.shutdown();
 		imguiShutdown();
+
+		// This reports that the device is alive but it's just its own ref to it. Standard reporting shows all references are released
+		pDebugDevice->ReportLiveDeviceObjects(D3D12_RLDO_DETAIL | D3D12_RLDO_IGNORE_INTERNAL);
+		D3D12_RELEASE(pDebugDevice);
 	}
 
 	void Renderer::onResize(uint32_t width, uint32_t height)
 	{
+		// To resize the backBuffers we need to release all direct and indirect references (ClearState) to them first
 		for (FrameResources& frame : m_frames)
 		{
 			wait(frame.pFence, frame.fenceValue);
 			reset(frame.pCommandAllocator, frame.pCommandList);
 			
-			// Release all in-direct backBuffer references
 			frame.pCommandList->ClearState(nullptr);
 
 			execute(frame.pCommandList);
 			signal(frame.pFence, frame.fenceValue);
 			wait(frame.pFence, frame.fenceValue);
 
-			// Release all direct backBuffer references
 			D3D12_RELEASE(frame.pBackBuffer);
+			D3D12_RELEASE(frame.pMainBuffer);
 			D3D12_RELEASE(frame.pDepthTexture);
+
+			for (ID3D12Resource*& pGBuffer : frame.pGBuffers)
+				D3D12_RELEASE(pGBuffer);
 		}
 
 		m_pSwapChain->ResizeBuffers(MAX_FRAMES_IN_FLIGHT, width, height, DXGI_FORMAT_R8G8B8A8_UNORM, 0);
@@ -200,11 +211,20 @@ namespace Okay
 	void Renderer::preRender()
 	{
 		FrameResources& frame = getCurrentFrameResorces();
-		transitionResource(frame.pCommandList, frame.pBackBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+		transitionResource(frame.pCommandList, frame.pMainBuffer, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+		for (uint32_t i = 0; i < RENDER_TARGETS; i++)
+			transitionResource(frame.pCommandList, frame.pGBuffers[i], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
 		static const float CLEAR_COLOUR[4] = { 0.4f, 0.3f, 0.7f, 0.f };
-		frame.pCommandList->ClearRenderTargetView(frame.cpuBackBufferRTV, CLEAR_COLOUR, 0, nullptr);
+		frame.pCommandList->ClearRenderTargetView(frame.mainBufferRTV, CLEAR_COLOUR, 0, nullptr);
 		frame.pCommandList->ClearDepthStencilView(frame.cpuDepthTextureDSV, D3D12_CLEAR_FLAG_DEPTH, 1.f, 0, 0, nullptr);
+
+		static const float CLEAR_COLOUR_ZERO[4] = { 0.f, 0.f, 0.f, 0.f };
+		for (uint32_t i = 0; i < RENDER_TARGETS; i++)
+		{
+			frame.pCommandList->ClearRenderTargetView(frame.gBufferRTVs[i], CLEAR_COLOUR_ZERO, 0, nullptr);
+		}
 	}
 
 	void Renderer::renderWorld(const World& world)
@@ -214,15 +234,16 @@ namespace Okay
 		frame.pCommandList->SetGraphicsRootSignature(m_pVoxelRootSignature);
 		frame.pCommandList->SetPipelineState(m_pVoxelPSO);
 
-		frame.pCommandList->SetDescriptorHeaps(1, &m_pTextureDescHeap);
-		frame.pCommandList->SetGraphicsRootDescriptorTable(3, m_textureHandle);
+		ID3D12DescriptorHeap* pTextureDescriptorHeap = m_SRVUAVDescriptorHeap.getD3D12DescriptorHeap();
+		frame.pCommandList->SetDescriptorHeaps(1, &pTextureDescriptorHeap);
+		frame.pCommandList->SetGraphicsRootDescriptorTable(3, m_textureSheetHandle);
 
 		frame.pCommandList->SetGraphicsRootConstantBufferView(0, m_renderDataGVA);
 
 		frame.pCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		frame.pCommandList->RSSetViewports(1, &frame.viewport);
 		frame.pCommandList->RSSetScissorRects(1, &frame.scissorRect);
-		frame.pCommandList->OMSetRenderTargets(1, &frame.cpuBackBufferRTV, false, &frame.cpuDepthTextureDSV);
+		frame.pCommandList->OMSetRenderTargets(RENDER_TARGETS, frame.gBufferRTVs, false, &frame.cpuDepthTextureDSV);
 
 		for (DXChunk& dxChunk : m_dxChunks)
 		{
@@ -233,7 +254,23 @@ namespace Okay
 			drawGPUMeshInfo(dxChunk, dxChunk.blockGPUMeshInfo);
 		}
 
+		transitionResource(frame.pCommandList, frame.pMainBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+		for (uint32_t i = 0; i < RENDER_TARGETS; i++)
+			transitionResource(frame.pCommandList, frame.pGBuffers[i], D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+		frame.pCommandList->SetComputeRootSignature(m_pLightPassRootSignature);
+		frame.pCommandList->SetPipelineState(m_pLightVoxelPSO);
+
+		frame.pCommandList->SetComputeRootDescriptorTable(0, frame.gBufferSRVs[0]);
+		frame.pCommandList->SetComputeRootDescriptorTable(1, frame.mainBufferUAV);
+
+		glm::uvec2 numGroups = glm::uvec2((uint32_t)frame.viewport.Width / 16 + 1, (uint32_t)frame.viewport.Height / 9 + 1);
+		frame.pCommandList->Dispatch(numGroups.x, numGroups.y, 1); // TODO: Fix lmao
+
+		transitionResource(frame.pCommandList, frame.pMainBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
 		frame.pCommandList->SetPipelineState(m_pWaterPSO);
+		frame.pCommandList->OMSetRenderTargets(1, &frame.mainBufferRTV, false, &frame.cpuDepthTextureDSV);
 
 		for (const DXChunk& dxChunk : m_dxChunks)
 		{
@@ -248,10 +285,15 @@ namespace Okay
 	{
 		FrameResources& frame = getCurrentFrameResorces();
 		
-		frame.pCommandList->SetDescriptorHeaps(1, &m_pImguiDescriptorHeap);
+		ID3D12DescriptorHeap* pImguiDescriptorHeap = m_imguiDescriptorHeap.getD3D12DescriptorHeap();
+		frame.pCommandList->SetDescriptorHeaps(1, &pImguiDescriptorHeap);
 		imguiEndFrame(frame.pCommandList);
 
-		transitionResource(frame.pCommandList, frame.pBackBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+		transitionResource(frame.pCommandList, frame.pMainBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
+		transitionResource(frame.pCommandList, frame.pBackBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST);
+		frame.pCommandList->CopyResource(frame.pBackBuffer, frame.pMainBuffer);
+
+		transitionResource(frame.pCommandList, frame.pBackBuffer, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
 
 		execute(frame.pCommandList);
 		m_pSwapChain->Present(0, 0);
@@ -732,56 +774,6 @@ namespace Okay
 		}
 	}
 
-	D3D12_CPU_DESCRIPTOR_HANDLE Renderer::createRTVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc)
-	{
-		OKAY_ASSERT(pResource || pDesc);
-
-		D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = pDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-		cpuHandle.ptr += slotIdx * (uint64_t)m_rtvIncrementSize;
-		m_pDevice->CreateRenderTargetView(pResource, pDesc, cpuHandle);
-
-		return cpuHandle;
-	}
-
-	D3D12_CPU_DESCRIPTOR_HANDLE Renderer::createDSVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_DEPTH_STENCIL_VIEW_DESC* pDesc)
-	{
-		OKAY_ASSERT(pResource || pDesc);
-
-		D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = pDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-		cpuHandle.ptr += slotIdx * (uint64_t)m_dsvIncrementSize;
-		m_pDevice->CreateDepthStencilView(pResource, pDesc, cpuHandle);
-		
-		return cpuHandle;
-	}
-
-	D3D12_GPU_DESCRIPTOR_HANDLE Renderer::createSRVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_SHADER_RESOURCE_VIEW_DESC* pDesc)
-	{
-		OKAY_ASSERT(pResource || pDesc);
-
-		D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = pDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-		cpuHandle.ptr += slotIdx * (uint64_t)m_cbvSrvUavIncrementSize;
-		m_pDevice->CreateShaderResourceView(pResource, pDesc, cpuHandle);
-
-		// returns for convenience
-		D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = pDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
-		gpuHandle.ptr += slotIdx * (uint64_t)m_cbvSrvUavIncrementSize;
-		return gpuHandle;
-	}
-
-	D3D12_GPU_DESCRIPTOR_HANDLE Renderer::createUAVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_UNORDERED_ACCESS_VIEW_DESC* pDesc)
-	{
-		OKAY_ASSERT(pResource || pDesc);
-
-		D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = pDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-		cpuHandle.ptr += slotIdx * (uint64_t)m_cbvSrvUavIncrementSize;
-		m_pDevice->CreateUnorderedAccessView(pResource, nullptr, pDesc, cpuHandle);
-
-		// returns for convenience
-		D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = pDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
-		gpuHandle.ptr += slotIdx * (uint64_t)m_cbvSrvUavIncrementSize;
-		return gpuHandle;
-	}
-
 	D3D12_GPU_VIRTUAL_ADDRESS Renderer::allocateIntoResourceArena(ResourceArena& arena, ResourceSlot* pOutSlot, const void* pData, uint64_t dataSize)
 	{
 		FrameResources& frame = getCurrentFrameResorces();
@@ -870,7 +862,7 @@ namespace Okay
 		swapChainDesc.SampleDesc.Count = 1;
 		swapChainDesc.SampleDesc.Quality = 0;
 
-		swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+		swapChainDesc.BufferUsage = DXGI_USAGE_BACK_BUFFER;
 		swapChainDesc.BufferCount = MAX_FRAMES_IN_FLIGHT;
 		swapChainDesc.OutputWindow = window.getHWND();
 		swapChainDesc.Windowed = true;
@@ -907,6 +899,10 @@ namespace Okay
 		D3D12_RELEASE(frame.pCommandList);
 		D3D12_RELEASE(frame.pBackBuffer);
 		D3D12_RELEASE(frame.pDepthTexture);
+		D3D12_RELEASE(frame.pMainBuffer);
+
+		for (ID3D12Resource*& pGBuffer : frame.pGBuffers)
+			D3D12_RELEASE(pGBuffer);
 
 		frame.ringBuffer.shutdown();
 	}
@@ -920,60 +916,131 @@ namespace Okay
 		heapProperties.CreationNodeMask = 0;
 		heapProperties.VisibleNodeMask = 0;
 
-		D3D12_CLEAR_VALUE clearValue = {};
-		clearValue.DepthStencil.Depth = 1.f;
-		clearValue.DepthStencil.Stencil = 0;
+		D3D12_CLEAR_VALUE mainRenderClearValue = {};
+		mainRenderClearValue.Color[0] = 0.4f;
+		mainRenderClearValue.Color[1] = 0.3f;
+		mainRenderClearValue.Color[2] = 0.7f;
+		mainRenderClearValue.Color[3] = 0.f;
+		mainRenderClearValue.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+		D3D12_CLEAR_VALUE depthClearValue = {};
+		depthClearValue.DepthStencil.Depth = 1.f;
+		depthClearValue.DepthStencil.Stencil = 0;
+		depthClearValue.Format = DXGI_FORMAT_D32_FLOAT;
+
+		m_RTVDescriptorHeap.setNextAppendSlot(0);
+		m_DSVDescriptorHeap.setNextAppendSlot(0);
+		m_SRVUAVDescriptorHeap.setNextAppendSlot(1); // Slot 0 is reserved for the texture sheet
 
 		for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		{
 			FrameResources& frame = m_frames[i];
+			std::wstring iStr = std::to_wstring(i);
 
-			// Back Buffer
+			// Back Buffer & Main Render Texture
 			DX_CHECK(m_pSwapChain->GetBuffer(i, IID_PPV_ARGS(&frame.pBackBuffer)));
-			frame.cpuBackBufferRTV = createRTVDescriptor(m_pRTVDescHeap, i, frame.pBackBuffer, nullptr);
+			frame.pBackBuffer->SetName((L"BackBuffer_" + iStr).data());
+
+			D3D12_RESOURCE_DESC mainBufferDesc = frame.pBackBuffer->GetDesc();
+			mainBufferDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+			DX_CHECK(m_pDevice->CreateCommittedResource(&heapProperties,
+				D3D12_HEAP_FLAG_NONE,
+				&mainBufferDesc,
+				D3D12_RESOURCE_STATE_COMMON,
+				&mainRenderClearValue,
+				IID_PPV_ARGS(&frame.pMainBuffer)));
+
+			frame.pMainBuffer->SetName((L"MainBuffer_" + iStr).data());
+			frame.mainBufferRTV = m_RTVDescriptorHeap.createRTVDescriptor(DESCRIPTOR_HEAP_SLOT_APPEND, frame.pMainBuffer, nullptr);
+			frame.mainBufferUAV = m_SRVUAVDescriptorHeap.createUAVDescriptor(DESCRIPTOR_HEAP_SLOT_APPEND, frame.pMainBuffer, nullptr);
 
 
 			// Depth
-			D3D12_RESOURCE_DESC textureDesc = frame.pBackBuffer->GetDesc();
-			textureDesc.Format = DXGI_FORMAT_D32_FLOAT;
-			textureDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-			clearValue.Format = textureDesc.Format;
-			DX_CHECK(m_pDevice->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &textureDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &clearValue, IID_PPV_ARGS(&frame.pDepthTexture)));
+			D3D12_RESOURCE_DESC depthTextureDesc = frame.pBackBuffer->GetDesc();
+			depthTextureDesc.Format = DXGI_FORMAT_D32_FLOAT;
+			depthTextureDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+			DX_CHECK(m_pDevice->CreateCommittedResource(&heapProperties,
+				D3D12_HEAP_FLAG_NONE,
+				&depthTextureDesc,
+				D3D12_RESOURCE_STATE_DEPTH_WRITE,
+				&depthClearValue,
+				IID_PPV_ARGS(&frame.pDepthTexture)));
 
-			frame.cpuDepthTextureDSV = m_pDSVDescHeap->GetCPUDescriptorHandleForHeapStart();
-			frame.cpuDepthTextureDSV.ptr += (uint64_t)i * m_dsvIncrementSize;
-
-			m_pDevice->CreateDepthStencilView(frame.pDepthTexture, nullptr, frame.cpuDepthTextureDSV);
+			frame.pDepthTexture->SetName((L"DepthBuffer_" + iStr).data());
+			frame.cpuDepthTextureDSV = m_DSVDescriptorHeap.createDSVDescriptor(i, frame.pDepthTexture, nullptr);
 
 
 			// Viewport & ScissorRect
 			frame.viewport.TopLeftX = 0;
 			frame.viewport.TopLeftY = 0;
-			frame.viewport.Width = (float)textureDesc.Width;
-			frame.viewport.Height = (float)textureDesc.Height;
+			frame.viewport.Width = (float)mainBufferDesc.Width;
+			frame.viewport.Height = (float)mainBufferDesc.Height;
 			frame.viewport.MinDepth = 0.f;
 			frame.viewport.MaxDepth = 1.f;
 
 			frame.scissorRect.left = 0;
 			frame.scissorRect.top = 0;
-			frame.scissorRect.right = (LONG)textureDesc.Width;
-			frame.scissorRect.bottom = (LONG)textureDesc.Height;
+			frame.scissorRect.right = (LONG)mainBufferDesc.Width;
+			frame.scissorRect.bottom = (LONG)mainBufferDesc.Height;
+
+
+			// GBuffers
+			for (uint32_t k = 0; k < RENDER_TARGETS; k++)
+			{
+				DXGI_FORMAT format = {};
+				switch (k) // ):<
+				{
+				case 0:
+					format = DXGI_FORMAT_R8G8B8A8_UNORM;
+					break;
+				case 1:
+					format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+					break;
+				case 2:
+					format = DXGI_FORMAT_R8G8B8A8_SNORM;
+					break;
+				}
+
+				ID3D12Resource* pGBuffer = createGBuffer((uint32_t)mainBufferDesc.Width, mainBufferDesc.Height, format, std::wstring(L"GBuffer_") + iStr + L"_" + std::to_wstring(k));
+				frame.pGBuffers[k] = pGBuffer;
+
+				frame.gBufferRTVs[k] = m_RTVDescriptorHeap.createRTVDescriptor(DESCRIPTOR_HEAP_SLOT_APPEND, pGBuffer, nullptr);
+				frame.gBufferSRVs[k] = m_SRVUAVDescriptorHeap.createSRVDescriptor(DESCRIPTOR_HEAP_SLOT_APPEND, pGBuffer, nullptr);
+			}
 		}
 	}
 
-	ID3D12DescriptorHeap* Renderer::createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors, bool shaderVisible, std::wstring_view name)
+	ID3D12Resource* Renderer::createGBuffer(uint32_t width, uint32_t height, DXGI_FORMAT format, std::wstring_view name)
 	{
-		D3D12_DESCRIPTOR_HEAP_DESC descHeapDesc = {};
-		descHeapDesc.NodeMask = 0;
-		descHeapDesc.Type = type;
-		descHeapDesc.NumDescriptors = numDescriptors;
-		descHeapDesc.Flags = shaderVisible ? D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE : D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+		D3D12_RESOURCE_DESC desc = {};
+		desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+		desc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+		desc.Width = width;
+		desc.Height = height;
+		desc.DepthOrArraySize = 1;
+		desc.MipLevels = 1;
+		desc.Format = format;
+		desc.SampleDesc.Count = 1;
+		desc.SampleDesc.Quality = 0;
+		desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+		desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
-		ID3D12DescriptorHeap* pDescriptorHeap = nullptr;
-		DX_CHECK(m_pDevice->CreateDescriptorHeap(&descHeapDesc, IID_PPV_ARGS(&pDescriptorHeap)));
+		D3D12_HEAP_PROPERTIES heapProperties = {};
+		heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+		heapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+		heapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+		heapProperties.CreationNodeMask = 0;
+		heapProperties.VisibleNodeMask = 0;
 
-		pDescriptorHeap->SetName(name.data());
-		return pDescriptorHeap;
+		D3D12_CLEAR_VALUE clearValue = {};
+		clearValue.Format = format;
+		clearValue.Color[0] = clearValue.Color[1] = clearValue.Color[2] = clearValue.Color[3] = 0.f;
+
+		ID3D12Resource* pResource = nullptr;
+		DX_CHECK(m_pDevice->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, &clearValue, IID_PPV_ARGS(&pResource)));
+
+		pResource->SetName(name.data());
+		return pResource;
 	}
 
 	ID3D12Resource* Renderer::createCommittedBuffer(uint64_t size, D3D12_RESOURCE_STATES initialState, D3D12_HEAP_TYPE heapType, std::wstring_view name)
@@ -1269,7 +1336,8 @@ namespace Okay
 		}
 
 
-		ID3D12DescriptorHeap* pDescriptorHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, textureDesc.MipLevels * 2, true, L"MipMapTextureSheet");
+		DescriptorHeap sheetDescriptorHeap;
+		sheetDescriptorHeap.initialize(m_pDevice, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, textureDesc.MipLevels * 2, true, L"MipMapTextureSheet");
 		ID3D12Resource* pUAVTexture = nullptr;
 		{
 			D3D12_HEAP_PROPERTIES heapProperties = {};
@@ -1318,6 +1386,8 @@ namespace Okay
 
 		pComputeList->SetComputeRootSignature(pComputeSignature);
 		pComputeList->SetPipelineState(pComputePSO);
+
+		ID3D12DescriptorHeap* pDescriptorHeap = sheetDescriptorHeap.getD3D12DescriptorHeap();
 		pComputeList->SetDescriptorHeaps(1, &pDescriptorHeap);
 
 		for (uint32_t i = 0; i < textureDesc.MipLevels - 1u; i++)
@@ -1325,8 +1395,8 @@ namespace Okay
 			sourceSRV.Texture2D.MostDetailedMip = i;
 			targetUAV.Texture2D.MipSlice = i + 1;
 
-			D3D12_GPU_DESCRIPTOR_HANDLE descriptor0Handle = createSRVDescriptor(pDescriptorHeap, (i * 2), pUAVTexture, &sourceSRV);
-			createUAVDescriptor(pDescriptorHeap, (i * 2) + 1, pUAVTexture, &targetUAV); // Descriptor 1 Handle
+			D3D12_GPU_DESCRIPTOR_HANDLE descriptor0Handle = sheetDescriptorHeap.createSRVDescriptor(DESCRIPTOR_HEAP_SLOT_APPEND, pUAVTexture, &sourceSRV);
+			sheetDescriptorHeap.createUAVDescriptor(DESCRIPTOR_HEAP_SLOT_APPEND, pUAVTexture, &targetUAV); // Descriptor 1 Handle
 
 			uint32_t mipWidth = glm::max(1u, (uint32_t)textureDesc.Width / (uint32_t)glm::pow(2, i));
 			uint32_t mipHeight = glm::max(1u, textureDesc.Height / (uint32_t)glm::pow(2, i));
@@ -1386,133 +1456,174 @@ namespace Okay
 
 	void Renderer::createVoxelRenderPass()
 	{
-		std::vector<D3D12_ROOT_PARAMETER> rootParams;
-		rootParams.emplace_back(createRootParamCBV(D3D12_SHADER_VISIBILITY_ALL, 0, 0));
-		rootParams.emplace_back(createRootParamCBV(D3D12_SHADER_VISIBILITY_VERTEX, 1, 0));
-		rootParams.emplace_back(createRootParamSRV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0));
+		RenderPassSpecification voxelPass = RenderPassSpecification(RenderPassType::Graphic);
+		voxelPass.graphicsDesc = createDefaultGraphicsPipelineStateDesc();
+		voxelPass.graphicsDesc.NumRenderTargets = RENDER_TARGETS;
+		voxelPass.graphicsDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM; // Diffuse
+		voxelPass.graphicsDesc.RTVFormats[1] = DXGI_FORMAT_R32G32B32A32_FLOAT; // World pos
+		voxelPass.graphicsDesc.RTVFormats[2] = DXGI_FORMAT_R8G8B8A8_SNORM; // Normals
+		voxelPass.graphicsDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+
+		voxelPass.vsPath = SHADER_PATH / "VertexShader.hlsl";
+		voxelPass.psPath = SHADER_PATH / "PixelShader.hlsl";
 
 		D3D12_DESCRIPTOR_RANGE textureRange = createRangeSRV(1, 0, 1, 0);
-		rootParams.emplace_back(createRootParamTable(D3D12_SHADER_VISIBILITY_ALL, &textureRange, 1));
+		voxelPass.rootParams =
+		{
+			createRootParamCBV(D3D12_SHADER_VISIBILITY_ALL, 0, 0),
+			createRootParamCBV(D3D12_SHADER_VISIBILITY_VERTEX, 1, 0),
+			createRootParamSRV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0),
+			createRootParamTable(D3D12_SHADER_VISIBILITY_ALL, &textureRange, 1),
+		};
 
 		D3D12_STATIC_SAMPLER_DESC pointSampler = createDefaultStaticPointSamplerDesc();
 		pointSampler.Filter = D3D12_FILTER_MIN_MAG_POINT_MIP_LINEAR;
 		pointSampler.MaxLOD = 4;
+		voxelPass.staticSamplers = { pointSampler };
 
-		D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
-		rootDesc.NumParameters = (uint32_t)rootParams.size();
-		rootDesc.pParameters = rootParams.data();
-		rootDesc.NumStaticSamplers = 1;
-		rootDesc.pStaticSamplers = &pointSampler;
-		rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
-
-		m_pVoxelRootSignature = createRootSignature(&rootDesc, L"VoxelRootSignature");
+		createRenderPass(voxelPass, &m_pVoxelRootSignature, &m_pVoxelPSO);
 
 
-		ID3DBlob* pShaderBlobs[5] = {};
-		uint32_t shaderBlobIdx = 0;
+		// ------ Water
 
-		D3D12_GRAPHICS_PIPELINE_STATE_DESC pipelineDesc = createDefaultGraphicsPipelineStateDesc();
-		pipelineDesc.pRootSignature = m_pVoxelRootSignature;
-		pipelineDesc.VS = compileShader(SHADER_PATH / "VertexShader.hlsl", "vs_5_1", &pShaderBlobs[shaderBlobIdx++]);
-		pipelineDesc.PS = compileShader(SHADER_PATH / "PixelShader.hlsl", "ps_5_1", &pShaderBlobs[shaderBlobIdx++]);
-		pipelineDesc.NumRenderTargets = 1;
-		pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-		pipelineDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+		RenderPassSpecification waterPass = RenderPassSpecification(RenderPassType::Graphic);
+		waterPass.graphicsDesc = createDefaultGraphicsPipelineStateDesc();
+		waterPass.graphicsDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+		waterPass.graphicsDesc.pRootSignature = m_pVoxelRootSignature;
+		waterPass.graphicsDesc.NumRenderTargets = 1;
+		waterPass.graphicsDesc.BlendState.RenderTarget[0].BlendEnable = TRUE;
+		waterPass.graphicsDesc.BlendState.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+		waterPass.graphicsDesc.BlendState.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+		waterPass.graphicsDesc.BlendState.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+		waterPass.graphicsDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+		waterPass.graphicsDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 
-		DX_CHECK(m_pDevice->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_pVoxelPSO)));
+		waterPass.vsPath = SHADER_PATH / "WaterVertexShader.hlsl";
+		waterPass.psPath = SHADER_PATH / "WaterPixelShader.hlsl";
 
-		for (ID3DBlob*& pBlob : pShaderBlobs)
-			D3D12_RELEASE(pBlob);
+		waterPass.rootParams = voxelPass.rootParams;
+		waterPass.staticSamplers = voxelPass.staticSamplers;
 
-		
-		pipelineDesc.BlendState.RenderTarget[0].BlendEnable = TRUE;
-		pipelineDesc.BlendState.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
-		pipelineDesc.BlendState.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
-		pipelineDesc.BlendState.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
-		pipelineDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
-		
-		pipelineDesc.VS = compileShader(SHADER_PATH / "WaterVertexShader.hlsl", "vs_5_1", &pShaderBlobs[shaderBlobIdx++]);
-		pipelineDesc.PS = compileShader(SHADER_PATH / "WaterPixelShader.hlsl", "ps_5_1", &pShaderBlobs[shaderBlobIdx++]);
-		pipelineDesc.NumRenderTargets = 1;
-		pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-		pipelineDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+		createRenderPass(waterPass, nullptr, &m_pWaterPSO);
 
-		DX_CHECK(m_pDevice->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_pWaterPSO)));
 
-		for (ID3DBlob*& pBlob : pShaderBlobs)
-			D3D12_RELEASE(pBlob);
+		// ------ Compute SSAO & Lightning pass
+
+		RenderPassSpecification voxelLightPass = RenderPassSpecification(RenderPassType::Compute);
+		voxelLightPass.computeDesc.NodeMask = 0;
+		voxelLightPass.computeDesc.CachedPSO.pCachedBlob = nullptr;
+		voxelLightPass.computeDesc.CachedPSO.CachedBlobSizeInBytes = 0;
+		voxelLightPass.computeDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
+		voxelLightPass.csPath = SHADER_PATH / "SSAO.hlsl";
+
+		D3D12_DESCRIPTOR_RANGE gBufferRange = createRangeSRV(2, 1, 3, 0);
+		D3D12_DESCRIPTOR_RANGE backBufferRange = createRangeUAV(0, 0, 1, 0);
+		voxelLightPass.rootParams =
+		{
+			createRootParamTable(D3D12_SHADER_VISIBILITY_ALL, &gBufferRange, 1),
+			createRootParamTable(D3D12_SHADER_VISIBILITY_ALL, &backBufferRange, 1),
+		};
+
+		createRenderPass(voxelLightPass, &m_pLightPassRootSignature, &m_pLightVoxelPSO);
 	}
 
 	void Renderer::createSkyboxRenderPass()
 	{
-		ID3DBlob* pShaderBlobs[5] = {};
-		uint32_t shaderBlobIdx = 0;
+		RenderPassSpecification skyboxPass = RenderPassSpecification(RenderPassType::Graphic);
+		skyboxPass.graphicsDesc = createDefaultGraphicsPipelineStateDesc();
+		skyboxPass.graphicsDesc.NumRenderTargets = 1;
+		skyboxPass.graphicsDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+		skyboxPass.graphicsDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+		skyboxPass.graphicsDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+		skyboxPass.graphicsDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
 
-		D3D12_ROOT_PARAMETER cameraParam = createRootParamCBV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0);
+		skyboxPass.vsPath = SHADER_PATH / "SkyBoxVS.hlsl";
+		skyboxPass.psPath = SHADER_PATH / "SkyBoxPS.hlsl";
 
-		D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
-		rootDesc.NumParameters = 1;
-		rootDesc.pParameters = &cameraParam;
-		rootDesc.NumStaticSamplers = 0;
-		rootDesc.pStaticSamplers = nullptr;
-		rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
-		m_pSkyBoxRootSignature = createRootSignature(&rootDesc, L"SkyboxRootSignature");
+		skyboxPass.rootParams = { createRootParamCBV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0) };
 
-		D3D12_GRAPHICS_PIPELINE_STATE_DESC pipelineDesc = createDefaultGraphicsPipelineStateDesc();
-		pipelineDesc.pRootSignature = m_pSkyBoxRootSignature;
-		pipelineDesc.VS = compileShader(SHADER_PATH / "SkyBoxVS.hlsl", "vs_5_1", &pShaderBlobs[shaderBlobIdx++]);
-		pipelineDesc.PS = compileShader(SHADER_PATH / "SkyBoxPS.hlsl", "ps_5_1", &pShaderBlobs[shaderBlobIdx++]);
-		pipelineDesc.NumRenderTargets = 1;
-		pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-		pipelineDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-		pipelineDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-		pipelineDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
-
-		DX_CHECK(m_pDevice->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_pSkyBoxPSO)));
-
-		for (ID3DBlob*& pBlob : pShaderBlobs)
-			D3D12_RELEASE(pBlob);
+		createRenderPass(skyboxPass, &m_pSkyBoxRootSignature, &m_pSkyBoxPSO);
 	}
 
 	void Renderer::createCloudsRenderPass()
 	{
-		ID3DBlob* pShaderBlobs[5] = {};
-		uint32_t shaderBlobIdx = 0;
+		RenderPassSpecification cloudPass = RenderPassSpecification(RenderPassType::Graphic);
+		cloudPass.graphicsDesc = createDefaultGraphicsPipelineStateDesc();
+		cloudPass.graphicsDesc.NumRenderTargets = 1;
+		cloudPass.graphicsDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+		cloudPass.graphicsDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
 
-		D3D12_ROOT_PARAMETER rootParams[] = 
+		cloudPass.graphicsDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+
+		cloudPass.graphicsDesc.BlendState.RenderTarget[0].BlendEnable = TRUE;
+		cloudPass.graphicsDesc.BlendState.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+		cloudPass.graphicsDesc.BlendState.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+		cloudPass.graphicsDesc.BlendState.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+		cloudPass.graphicsDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+
+		cloudPass.vsPath = SHADER_PATH / "CloudsVS.hlsl";
+		cloudPass.psPath = SHADER_PATH / "CloudsPS.hlsl";
+
+		cloudPass.rootParams =
 		{
 			createRootParamCBV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0), // RenderData
-			createRootParamSRV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0),  // CloudData list
-			createRootParamCBV(D3D12_SHADER_VISIBILITY_VERTEX, 1, 0),  // CloudRenderData
+			createRootParamSRV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0), // CloudData list
+			createRootParamCBV(D3D12_SHADER_VISIBILITY_VERTEX, 1, 0), // CloudRenderData
 		};
 
-		D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
-		rootDesc.NumParameters = _countof(rootParams);
-		rootDesc.pParameters = rootParams;
-		rootDesc.NumStaticSamplers = 0;
-		rootDesc.pStaticSamplers = nullptr;
-		rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
-		m_pCloudsRootSignature = createRootSignature(&rootDesc, L"CloudsRootSignature");
+		createRenderPass(cloudPass, &m_pCloudsRootSignature, &m_pCloudsPSO);
+	}
 
-		D3D12_GRAPHICS_PIPELINE_STATE_DESC pipelineDesc = createDefaultGraphicsPipelineStateDesc();
-		pipelineDesc.pRootSignature = m_pCloudsRootSignature;
-		pipelineDesc.VS = compileShader(SHADER_PATH / "CloudsVS.hlsl", "vs_5_1", &pShaderBlobs[shaderBlobIdx++]);
-		pipelineDesc.PS = compileShader(SHADER_PATH / "CloudsPS.hlsl", "ps_5_1", &pShaderBlobs[shaderBlobIdx++]);
-		pipelineDesc.NumRenderTargets = 1;
-		pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-		pipelineDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+	void Renderer::createRenderPass(const RenderPassSpecification& spec, ID3D12RootSignature** ppOutRS, ID3D12PipelineState** ppOutPSO)
+	{
+		OKAY_ASSERT(spec.type != RenderPassType::None);
 
-		pipelineDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+		ID3D12RootSignature* pRootSignature = nullptr;
+		if (spec.graphicsDesc.pRootSignature || spec.computeDesc.pRootSignature)
+		{
+			pRootSignature = spec.type == RenderPassType::Graphic ? spec.graphicsDesc.pRootSignature : spec.computeDesc.pRootSignature;
+		}
+		else
+		{
+			D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
+			rootDesc.NumParameters = (uint32_t)spec.rootParams.size();
+			rootDesc.pParameters = spec.rootParams.data();
+			rootDesc.NumStaticSamplers = (uint32_t)spec.staticSamplers.size();
+			rootDesc.pStaticSamplers = spec.staticSamplers.data();
+			rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
 
-		pipelineDesc.BlendState.RenderTarget[0].BlendEnable = TRUE;
-		pipelineDesc.BlendState.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
-		pipelineDesc.BlendState.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
-		pipelineDesc.BlendState.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
-		pipelineDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+			pRootSignature = createRootSignature(&rootDesc, std::wstring(spec.dbgName) + L"RootSignature");
+			*ppOutRS = pRootSignature;
+		}
+		
 
-		DX_CHECK(m_pDevice->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_pCloudsPSO)));
+		ID3DBlob* pShaderBlobs[5] = {};
+		uint32_t blobIdx = 0;
 
-		for (ID3DBlob*& pBlob : pShaderBlobs)
-			D3D12_RELEASE(pBlob);
+		if (spec.type == RenderPassType::Graphic)
+		{
+			D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = spec.graphicsDesc;
+			psoDesc.VS = !spec.vsPath.empty() ? compileShader(spec.vsPath, "vs_5_1", &pShaderBlobs[blobIdx++]) : D3D12_SHADER_BYTECODE{};
+			psoDesc.HS = !spec.hsPath.empty() ? compileShader(spec.hsPath, "hs_5_1", &pShaderBlobs[blobIdx++]) : D3D12_SHADER_BYTECODE{};
+			psoDesc.DS = !spec.dsPath.empty() ? compileShader(spec.dsPath, "ds_5_1", &pShaderBlobs[blobIdx++]) : D3D12_SHADER_BYTECODE{};
+			psoDesc.GS = !spec.gsPath.empty() ? compileShader(spec.gsPath, "gs_5_1", &pShaderBlobs[blobIdx++]) : D3D12_SHADER_BYTECODE{};
+			psoDesc.PS = !spec.psPath.empty() ? compileShader(spec.psPath, "ps_5_1", &pShaderBlobs[blobIdx++]) : D3D12_SHADER_BYTECODE{};
+
+			psoDesc.pRootSignature = pRootSignature;
+			DX_CHECK(m_pDevice->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(ppOutPSO)));
+			(*ppOutPSO)->SetName((std::wstring(spec.dbgName) + L"PipelineState").c_str());
+		}
+		else // RenderPassType::Compute
+		{
+			D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = spec.computeDesc;
+			psoDesc.CS = !spec.csPath.empty() ? compileShader(spec.csPath, "cs_5_1", &pShaderBlobs[blobIdx++]) : D3D12_SHADER_BYTECODE{};
+
+			psoDesc.pRootSignature = pRootSignature;
+			DX_CHECK(m_pDevice->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(ppOutPSO)));
+			(*ppOutPSO)->SetName((std::wstring(spec.dbgName) + L"PipelineState").c_str());
+		}
+
+		for (ID3DBlob* pShaderBlob : pShaderBlobs)
+			D3D12_RELEASE(pShaderBlob);
 	}
 }

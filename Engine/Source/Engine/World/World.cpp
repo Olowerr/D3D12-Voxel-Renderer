@@ -55,6 +55,8 @@ namespace Okay
 		m_cloudGenData.maskNoise.persistence = 0.48f;
 		m_cloudGenData.maskNoise.cutOff = 0.64f;
 		m_cloudGenData.maskNoise.exponent = 1.f;
+
+		//m_renderDistance = 4;
 	}
 
 	void World::shutdown()
