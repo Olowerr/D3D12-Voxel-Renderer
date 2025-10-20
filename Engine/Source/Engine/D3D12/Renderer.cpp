@@ -9,6 +9,8 @@
 
 #include <shared_mutex>
 
+//#define DEBUG_LAYERS_ENABLED
+
 namespace Okay
 {
 	struct GPURenderData
@@ -37,7 +39,7 @@ namespace Okay
 
 	void Renderer::initialize(Window& window)
 	{
-#if 0
+#ifdef DEBUG_LAYERS_ENABLED
 		enableDebugLayer();
 		enableGPUBasedValidation();
 #endif
@@ -93,16 +95,12 @@ namespace Okay
 
 	void Renderer::shutdown()
 	{
-		ID3D12DebugDevice* pDebugDevice = nullptr;
-		DX_CHECK(m_pDevice->QueryInterface<ID3D12DebugDevice>(&pDebugDevice));
-
 		for (FrameResources& frame : m_frames)
 			shutdowFrameResources(frame);
 
 		for (FrameGarbage& frameGarbage : m_frameGarbage)
 			D3D12_RELEASE(frameGarbage.pDxUnknown);
 		
-		D3D12_RELEASE(m_pDevice);
 		D3D12_RELEASE(m_pCommandQueue);
 		D3D12_RELEASE(m_pSwapChain);
 
@@ -129,9 +127,16 @@ namespace Okay
 		m_imguiDescriptorHeap.shutdown();
 		imguiShutdown();
 
+#ifdef DEBUG_LAYERS_ENABLED
+		ID3D12DebugDevice* pDebugDevice = nullptr;
+		DX_CHECK(m_pDevice->QueryInterface<ID3D12DebugDevice>(&pDebugDevice));
+
 		// This reports that the device is alive but it's just its own ref to it. Standard reporting shows all references are released
 		pDebugDevice->ReportLiveDeviceObjects(D3D12_RLDO_DETAIL | D3D12_RLDO_IGNORE_INTERNAL);
 		D3D12_RELEASE(pDebugDevice);
+#endif
+
+		D3D12_RELEASE(m_pDevice);
 	}
 
 	void Renderer::onResize(uint32_t width, uint32_t height)
