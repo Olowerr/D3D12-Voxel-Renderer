@@ -3,6 +3,7 @@
 #include "Engine/World/World.h"
 #include "Engine/Application/ImguiHelper.h"
 #include "Engine/World/Camera.h"
+#include "Engine/Utilities/Random.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
@@ -198,6 +199,9 @@ namespace Okay
 		frame.ringBuffer.unmap();
 	}
 
+	static D3D12_GPU_VIRTUAL_ADDRESS offsetsGVA;
+	static D3D12_GPU_VIRTUAL_ADDRESS randomVectorsGVA;
+
 	void Renderer::updateBuffers(const World& world, const Camera& camera)
 	{
 		FrameResources& frame = getCurrentFrameResorces();
@@ -209,6 +213,46 @@ namespace Okay
 		renderData.textureSheetPadding = TEXTURE_SHEET_PADDING;
 
 		m_renderDataGVA = frame.ringBuffer.allocate(&renderData, sizeof(renderData));
+
+		static std::vector<glm::vec3> offsets;
+		if (!offsets.size())
+		{
+			offsets.resize(64);
+			for (uint64_t i = 0; i < 64; i++)
+			{
+				glm::vec3 offset = glm::vec3(
+					Random::getFloat() * 2.f - 1.f,
+					Random::getFloat() * 2.f - 1.f,
+					Random::getFloat());
+
+				offset = glm::normalize(offset);
+				offset *= Random::getFloat();
+
+				float scale = (float)i / 64.f;
+				scale = glm::mix(0.1f, 1.f, scale * scale);
+				offset *= scale;
+
+				offsets[i] = offset;
+			}
+		}
+
+		static std::vector<glm::vec3> randomVectors;
+		if (!randomVectors.size())
+		{
+			randomVectors.resize(16);
+			for (uint64_t i = 0; i < 16; i++)
+			{
+				glm::vec3 vec = glm::vec3(
+					Random::getFloat() * 2.f - 1.f,
+					Random::getFloat() * 2.f - 1.f,
+					0.f);
+
+				randomVectors[i] = vec;
+			}
+		}
+
+		offsetsGVA = frame.ringBuffer.allocate(offsets.data(), sizeof(offsets[0]) * offsets.size());
+		randomVectorsGVA = frame.ringBuffer.allocate(randomVectors.data(), sizeof(randomVectors[0]) * randomVectors.size());
 
 		updateChunks(world);
 	}
@@ -266,11 +310,14 @@ namespace Okay
 		frame.pCommandList->SetComputeRootSignature(m_pLightPassRootSignature);
 		frame.pCommandList->SetPipelineState(m_pLightVoxelPSO);
 
-		frame.pCommandList->SetComputeRootDescriptorTable(0, frame.gBufferSRVs[0]);
-		frame.pCommandList->SetComputeRootDescriptorTable(1, frame.mainBufferUAV);
+		frame.pCommandList->SetComputeRootConstantBufferView(0, m_renderDataGVA);
+		frame.pCommandList->SetComputeRootDescriptorTable(1, frame.gBufferSRVs[0]);
+		frame.pCommandList->SetComputeRootDescriptorTable(2, frame.mainBufferUAV);
+		frame.pCommandList->SetComputeRootShaderResourceView(3, offsetsGVA);
+		frame.pCommandList->SetComputeRootShaderResourceView(4, randomVectorsGVA);
 
 		glm::uvec2 numGroups = glm::uvec2((uint32_t)frame.viewport.Width / 16 + 1, (uint32_t)frame.viewport.Height / 9 + 1);
-		frame.pCommandList->Dispatch(numGroups.x, numGroups.y, 1); // TODO: Fix lmao
+		frame.pCommandList->Dispatch(numGroups.x, numGroups.y, 1);
 
 		transitionResource(frame.pCommandList, frame.pMainBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
@@ -972,7 +1019,7 @@ namespace Okay
 				IID_PPV_ARGS(&frame.pDepthTexture)));
 
 			frame.pDepthTexture->SetName((L"DepthBuffer_" + iStr).data());
-			frame.cpuDepthTextureDSV = m_DSVDescriptorHeap.createDSVDescriptor(i, frame.pDepthTexture, nullptr);
+			frame.cpuDepthTextureDSV = m_DSVDescriptorHeap.createDSVDescriptor(DESCRIPTOR_HEAP_SLOT_APPEND, frame.pDepthTexture, nullptr);
 
 
 			// Viewport & ScissorRect
@@ -1525,9 +1572,17 @@ namespace Okay
 		D3D12_DESCRIPTOR_RANGE backBufferRange = createRangeUAV(0, 0, 1, 0);
 		voxelLightPass.rootParams =
 		{
+			createRootParamCBV(D3D12_SHADER_VISIBILITY_ALL, 0, 0), // RenderData
 			createRootParamTable(D3D12_SHADER_VISIBILITY_ALL, &gBufferRange, 1),
 			createRootParamTable(D3D12_SHADER_VISIBILITY_ALL, &backBufferRange, 1),
+			createRootParamSRV(D3D12_SHADER_VISIBILITY_ALL, 3, 0), // Offsets
+			createRootParamSRV(D3D12_SHADER_VISIBILITY_ALL, 4, 0), // random vectors
 		};
+
+		voxelLightPass.staticSamplers = voxelPass.staticSamplers;
+		voxelLightPass.staticSamplers[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+		voxelLightPass.staticSamplers[0].Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+		voxelLightPass.staticSamplers[0].MaxLOD = 0;
 
 		createRenderPass(voxelLightPass, &m_pLightPassRootSignature, &m_pLightVoxelPSO);
 	}

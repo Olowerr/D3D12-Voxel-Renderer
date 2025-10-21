@@ -18,7 +18,7 @@ namespace Okay
 			BlockType blockType = BlockType(i);
 			std::string blockName = strToLowerCase(BLOCK_NAMES[i]);
 
-			if (std::filesystem::exists(TEXTURES_PATH / (std::string(blockName) + ".png")))
+			if (std::filesystem::exists(TEXTURES_PATH / (blockName + ".png")))
 			{
 				for (uint32_t k = 0; k < 3; k++)
 				{
@@ -42,7 +42,7 @@ namespace Okay
 		outTextures[BlockType::OAK_LOG].textures[BlockSide::BOTTOM] = "oak_log_top";
 
 
-		// Ensure every side of every block has a texture
+		// Assert that every side of every block has a texture
 		for (uint32_t i = 1; i < NUM_BLOCKS; i++)
 		{
 			auto iterator = outTextures.find(BlockType(i));

@@ -68,6 +68,8 @@ ConstantBuffer<DrawCallData> drawCB : register(b1, space0);
 StructuredBuffer<Vertex> verticies : register(t0, space0);
 Texture2D<float4> textureSheet : register(t1, space0);
 Texture2D gBuffers[3] : register(t2, space1);
+StructuredBuffer<float3> offsets : register(t3, space0);
+StructuredBuffer<float3> randomVectors : register(t4, space0);
 
 RWTexture2D<float4> backBuffer : register(u0, space0);
 
@@ -96,4 +98,14 @@ float2 calculateUVCoords(float2 globalUV, uint textureID)
 uint extractData(uint data, uint bitPos, uint numBits)
 {
     return (data << bitPos) >> (32 - numBits);
+}
+
+
+uint pcgHash(inout uint seed)
+{
+    // Ty Cherno
+    seed *= 747796405u + 2891336453u;
+    seed = ((seed >> ((seed >> 28u) + 4u)) ^ seed) * 277803737u;
+    seed = (seed >> 22u) ^ seed;
+    return seed;
 }

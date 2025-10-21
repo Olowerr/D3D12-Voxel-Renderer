@@ -75,6 +75,7 @@
     <ClCompile Include="Source\Engine\Utilities\Collision.cpp" />
     <ClCompile Include="Source\Engine\Utilities\InterpolationList.cpp" />
     <ClCompile Include="Source\Engine\Utilities\Noise.cpp" />
+    <ClCompile Include="Source\Engine\Utilities\Random.cpp" />
     <ClCompile Include="Source\Engine\Utilities\ThreadPool.cpp" />
     <ClCompile Include="Source\Engine\World\Blocks.cpp" />
     <ClCompile Include="Source\Engine\World\World.cpp" />
@@ -155,6 +156,12 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="Resources\Shaders\GPUShared.hlsli">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+    </None>
+    <None Include="Resources\Shaders\SampleVectors.hlsli">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>

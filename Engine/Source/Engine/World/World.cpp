@@ -346,14 +346,12 @@ namespace Okay
 		float currentHeight = 0.f;
 		while (currentHeight < cloudHeight)
 		{
-			uint32_t seed = uint32_t(finalNoise * UINT_MAX + currentHeight);
-
 			glm::vec3 placementOffset = glm::vec3(
-				Random::randomFloat(seed) * 2.f - 1.f,
-				(Random::randomFloat(seed) * 2.f - 1.f) * 0.5f,
-				Random::randomFloat(seed) * 2.f - 1.f);
+				Random::getFloat() * 2.f - 1.f,
+				(Random::getFloat() * 2.f - 1.f) * 0.5f,
+				Random::getFloat() * 2.f - 1.f);
 
-			placementOffset = glm::normalize(placementOffset) * m_cloudGenData.maxOffset * Random::randomFloat(seed);
+			placementOffset = glm::normalize(placementOffset) * m_cloudGenData.maxOffset * Random::getFloat();
 			glm::vec3 cloudPoint = glm::vec3(x, m_cloudGenData.spawnHeight + currentHeight, z);
 
 			m_cloudGenData.cloudList.emplace_back(cloudPoint + placementOffset);
