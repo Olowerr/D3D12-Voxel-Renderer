@@ -71,7 +71,8 @@ Texture2D gBuffers[3] : register(t2, space1);
 StructuredBuffer<float3> offsets : register(t3, space0);
 StructuredBuffer<float3> randomVectors : register(t4, space0);
 
-RWTexture2D<float4> backBuffer : register(u0, space0);
+RWTexture2D<float4> mainBuffer : register(u0, space0);
+RWTexture2D<float4> ssaoBuffer : register(u1, space0);
 
 SamplerState pointSampler : register(s0, space0);
 

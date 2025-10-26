@@ -36,6 +36,9 @@ namespace Okay
 		D3D12_CPU_DESCRIPTOR_HANDLE mainBufferRTV = {};
 		D3D12_GPU_DESCRIPTOR_HANDLE mainBufferUAV = {};
 
+		ID3D12Resource* pSSAOBuffer = nullptr;
+		D3D12_GPU_DESCRIPTOR_HANDLE ssaoBufferUAV = {};
+
 		ID3D12Resource* pDepthTexture = nullptr;
 		D3D12_CPU_DESCRIPTOR_HANDLE cpuDepthTextureDSV = {};
 
@@ -257,7 +260,7 @@ namespace Okay
 		
 		void initializeFrameResources(FrameResources& frame, uint64_t ringBufferSize);
 		void shutdowFrameResources(FrameResources& frame);
-		void updateBackBufferTextures();
+		void createFramesTextures();
 
 		ID3D12Resource* createGBuffer(uint32_t width, uint32_t height, DXGI_FORMAT format, std::wstring_view name);
 
@@ -293,8 +296,13 @@ namespace Okay
 		ID3D12PipelineState* m_pVoxelPSO = nullptr;
 		ID3D12PipelineState* m_pWaterPSO = nullptr;
 		
-		ID3D12RootSignature* m_pLightPassRootSignature = nullptr;
-		ID3D12PipelineState* m_pLightVoxelPSO = nullptr;
+		ID3D12RootSignature* m_pSSAOMainRS = nullptr;
+		ID3D12PipelineState* m_pSSAOMainPSO = nullptr;
+		ID3D12RootSignature* m_pSSAOBlurRS = nullptr;
+		ID3D12PipelineState* m_pSSAOBlurPSO = nullptr;
+
+		ID3D12RootSignature* m_pLightingPassRS = nullptr;
+		ID3D12PipelineState* m_pLightingPassPSO = nullptr;
 
 		ID3D12RootSignature* m_pSkyBoxRootSignature = nullptr;
 		ID3D12PipelineState* m_pSkyBoxPSO = nullptr;

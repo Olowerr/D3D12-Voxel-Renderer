@@ -10,7 +10,8 @@
 
 #include <shared_mutex>
 
-//#define DEBUG_LAYERS_ENABLED
+#define DEBUG_LAYERS_ENABLED
+//#define GPU_BASED_VALIDATION_ENABLED
 
 namespace Okay
 {
@@ -42,6 +43,8 @@ namespace Okay
 	{
 #ifdef DEBUG_LAYERS_ENABLED
 		enableDebugLayer();
+#endif
+#ifdef GPU_BASED_VALIDATION_ENABLED
 		enableGPUBasedValidation();
 #endif
 
@@ -108,8 +111,12 @@ namespace Okay
 		D3D12_RELEASE(m_pVoxelRootSignature);
 		D3D12_RELEASE(m_pVoxelPSO);
 		D3D12_RELEASE(m_pWaterPSO);
-		D3D12_RELEASE(m_pLightPassRootSignature);
-		D3D12_RELEASE(m_pLightVoxelPSO);
+		D3D12_RELEASE(m_pSSAOMainRS);
+		D3D12_RELEASE(m_pSSAOMainPSO);
+		D3D12_RELEASE(m_pSSAOBlurRS);
+		D3D12_RELEASE(m_pSSAOBlurPSO);
+		D3D12_RELEASE(m_pLightingPassRS);
+		D3D12_RELEASE(m_pLightingPassPSO);
 		D3D12_RELEASE(m_pSkyBoxRootSignature);
 		D3D12_RELEASE(m_pSkyBoxPSO);
 		D3D12_RELEASE(m_pCloudsRootSignature);
@@ -156,6 +163,7 @@ namespace Okay
 
 			D3D12_RELEASE(frame.pBackBuffer);
 			D3D12_RELEASE(frame.pMainBuffer);
+			D3D12_RELEASE(frame.pSSAOBuffer);
 			D3D12_RELEASE(frame.pDepthTexture);
 
 			for (ID3D12Resource*& pGBuffer : frame.pGBuffers)
@@ -163,7 +171,7 @@ namespace Okay
 		}
 
 		m_pSwapChain->ResizeBuffers(MAX_FRAMES_IN_FLIGHT, width, height, DXGI_FORMAT_R8G8B8A8_UNORM, 0);
-		updateBackBufferTextures();
+		createFramesTextures();
 	}
 
 	void Renderer::unloadChunks()
@@ -217,20 +225,22 @@ namespace Okay
 		static std::vector<glm::vec3> offsets;
 		if (!offsets.size())
 		{
-			offsets.resize(64);
-			for (uint64_t i = 0; i < 64; i++)
+			uint64_t num = 128;
+			offsets.resize(num);
+			for (uint64_t i = 0; i < num; i++)
 			{
 				glm::vec3 offset = glm::vec3(
 					Random::getFloat() * 2.f - 1.f,
 					Random::getFloat() * 2.f - 1.f,
-					Random::getFloat());
+					Random::getFloat() * 2.f - 1.f);
+				offset.z = Random::getFloat();
 
 				offset = glm::normalize(offset);
-				offset *= Random::getFloat();
+				//offset *= glm::mix(0.1f, 1.f, Random::getFloat());
 
-				float scale = (float)i / 64.f;
-				scale = glm::mix(0.1f, 1.f, scale * scale);
-				offset *= scale;
+				//float scale = (float)i / (float)num;
+				//scale = glm::mix(0.1f, 1.f, scale * scale);
+				//offset *= scale;
 
 				offsets[i] = offset;
 			}
@@ -247,6 +257,7 @@ namespace Okay
 					Random::getFloat() * 2.f - 1.f,
 					0.f);
 
+				vec = glm::normalize(vec);
 				randomVectors[i] = vec;
 			}
 		}
@@ -265,7 +276,7 @@ namespace Okay
 		for (uint32_t i = 0; i < RENDER_TARGETS; i++)
 			transitionResource(frame.pCommandList, frame.pGBuffers[i], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-		static const float CLEAR_COLOUR[4] = { 0.4f, 0.3f, 0.7f, 0.f };
+		static const float CLEAR_COLOUR[4] = { 1.f, 1.f, 1.f, 0.f };
 		frame.pCommandList->ClearRenderTargetView(frame.mainBufferRTV, CLEAR_COLOUR, 0, nullptr);
 		frame.pCommandList->ClearDepthStencilView(frame.cpuDepthTextureDSV, D3D12_CLEAR_FLAG_DEPTH, 1.f, 0, 0, nullptr);
 
@@ -303,12 +314,13 @@ namespace Okay
 			drawGPUMeshInfo(dxChunk, dxChunk.blockGPUMeshInfo);
 		}
 
+		// SSAO Main
 		transitionResource(frame.pCommandList, frame.pMainBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 		for (uint32_t i = 0; i < RENDER_TARGETS; i++)
 			transitionResource(frame.pCommandList, frame.pGBuffers[i], D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
-		frame.pCommandList->SetComputeRootSignature(m_pLightPassRootSignature);
-		frame.pCommandList->SetPipelineState(m_pLightVoxelPSO);
+		frame.pCommandList->SetComputeRootSignature(m_pSSAOMainRS);
+		frame.pCommandList->SetPipelineState(m_pSSAOMainPSO);
 
 		frame.pCommandList->SetComputeRootConstantBufferView(0, m_renderDataGVA);
 		frame.pCommandList->SetComputeRootDescriptorTable(1, frame.gBufferSRVs[0]);
@@ -318,6 +330,24 @@ namespace Okay
 
 		glm::uvec2 numGroups = glm::uvec2((uint32_t)frame.viewport.Width / 16 + 1, (uint32_t)frame.viewport.Height / 9 + 1);
 		frame.pCommandList->Dispatch(numGroups.x, numGroups.y, 1);
+
+
+		// SSAO Blur
+		frame.pCommandList->SetComputeRootSignature(m_pSSAOBlurRS);
+		frame.pCommandList->SetPipelineState(m_pSSAOBlurPSO);
+		frame.pCommandList->SetComputeRootDescriptorTable(0, frame.mainBufferUAV);
+		frame.pCommandList->SetComputeRootDescriptorTable(1, frame.ssaoBufferUAV);
+		frame.pCommandList->Dispatch(numGroups.x, numGroups.y, 1);
+
+
+		// Lightning
+		frame.pCommandList->SetComputeRootSignature(m_pLightingPassRS);
+		frame.pCommandList->SetPipelineState(m_pLightingPassPSO);
+		frame.pCommandList->SetComputeRootDescriptorTable(0, frame.gBufferSRVs[0]);
+		frame.pCommandList->SetComputeRootDescriptorTable(1, frame.mainBufferUAV);
+		frame.pCommandList->SetComputeRootDescriptorTable(2, frame.ssaoBufferUAV);
+		frame.pCommandList->Dispatch(numGroups.x, numGroups.y, 1);
+
 
 		transitionResource(frame.pCommandList, frame.pMainBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
@@ -927,7 +957,7 @@ namespace Okay
 
 		m_pSwapChain = (IDXGISwapChain3*)pSwapChain;
 
-		updateBackBufferTextures();
+		createFramesTextures();
 	}
 
 	void Renderer::initializeFrameResources(FrameResources& frame, uint64_t ringBufferSize)
@@ -952,6 +982,7 @@ namespace Okay
 		D3D12_RELEASE(frame.pBackBuffer);
 		D3D12_RELEASE(frame.pDepthTexture);
 		D3D12_RELEASE(frame.pMainBuffer);
+		D3D12_RELEASE(frame.pSSAOBuffer);
 
 		for (ID3D12Resource*& pGBuffer : frame.pGBuffers)
 			D3D12_RELEASE(pGBuffer);
@@ -959,7 +990,7 @@ namespace Okay
 		frame.ringBuffer.shutdown();
 	}
 
-	void Renderer::updateBackBufferTextures()
+	void Renderer::createFramesTextures()
 	{
 		D3D12_HEAP_PROPERTIES heapProperties = {};
 		heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
@@ -969,9 +1000,9 @@ namespace Okay
 		heapProperties.VisibleNodeMask = 0;
 
 		D3D12_CLEAR_VALUE mainRenderClearValue = {};
-		mainRenderClearValue.Color[0] = 0.4f;
-		mainRenderClearValue.Color[1] = 0.3f;
-		mainRenderClearValue.Color[2] = 0.7f;
+		mainRenderClearValue.Color[0] = 1.f;
+		mainRenderClearValue.Color[1] = 1.f;
+		mainRenderClearValue.Color[2] = 1.f;
 		mainRenderClearValue.Color[3] = 0.f;
 		mainRenderClearValue.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 
@@ -1059,6 +1090,21 @@ namespace Okay
 				frame.gBufferRTVs[k] = m_RTVDescriptorHeap.createRTVDescriptor(DESCRIPTOR_HEAP_SLOT_APPEND, pGBuffer, nullptr);
 				frame.gBufferSRVs[k] = m_SRVUAVDescriptorHeap.createSRVDescriptor(DESCRIPTOR_HEAP_SLOT_APPEND, pGBuffer, nullptr);
 			}
+
+
+			// SSAO
+			D3D12_RESOURCE_DESC ssaoBufferDesc = mainBufferDesc;
+			ssaoBufferDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+			ssaoBufferDesc.Format = DXGI_FORMAT_R8_UNORM;
+			DX_CHECK(m_pDevice->CreateCommittedResource(&heapProperties,
+				D3D12_HEAP_FLAG_NONE,
+				&ssaoBufferDesc,
+				D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+				nullptr,
+				IID_PPV_ARGS(&frame.pSSAOBuffer)));
+
+			frame.pSSAOBuffer->SetName((L"SSAOBuffer_" + iStr).data());
+			frame.ssaoBufferUAV = m_SRVUAVDescriptorHeap.createUAVDescriptor(DESCRIPTOR_HEAP_SLOT_APPEND, frame.pSSAOBuffer, nullptr);
 		}
 	}
 
@@ -1561,16 +1607,16 @@ namespace Okay
 
 		// ------ Compute SSAO & Lightning pass
 
-		RenderPassSpecification voxelLightPass = RenderPassSpecification(RenderPassType::Compute);
-		voxelLightPass.computeDesc.NodeMask = 0;
-		voxelLightPass.computeDesc.CachedPSO.pCachedBlob = nullptr;
-		voxelLightPass.computeDesc.CachedPSO.CachedBlobSizeInBytes = 0;
-		voxelLightPass.computeDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
-		voxelLightPass.csPath = SHADER_PATH / "SSAO.hlsl";
+		RenderPassSpecification ssaoMainPass = RenderPassSpecification(RenderPassType::Compute);
+		ssaoMainPass.computeDesc.NodeMask = 0;
+		ssaoMainPass.computeDesc.CachedPSO.pCachedBlob = nullptr;
+		ssaoMainPass.computeDesc.CachedPSO.CachedBlobSizeInBytes = 0;
+		ssaoMainPass.computeDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
+		ssaoMainPass.csPath = SHADER_PATH / "SSAOCS.hlsl";
 
 		D3D12_DESCRIPTOR_RANGE gBufferRange = createRangeSRV(2, 1, 3, 0);
 		D3D12_DESCRIPTOR_RANGE backBufferRange = createRangeUAV(0, 0, 1, 0);
-		voxelLightPass.rootParams =
+		ssaoMainPass.rootParams =
 		{
 			createRootParamCBV(D3D12_SHADER_VISIBILITY_ALL, 0, 0), // RenderData
 			createRootParamTable(D3D12_SHADER_VISIBILITY_ALL, &gBufferRange, 1),
@@ -1579,12 +1625,40 @@ namespace Okay
 			createRootParamSRV(D3D12_SHADER_VISIBILITY_ALL, 4, 0), // random vectors
 		};
 
-		voxelLightPass.staticSamplers = voxelPass.staticSamplers;
-		voxelLightPass.staticSamplers[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-		voxelLightPass.staticSamplers[0].Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
-		voxelLightPass.staticSamplers[0].MaxLOD = 0;
+		ssaoMainPass.staticSamplers = voxelPass.staticSamplers;
+		ssaoMainPass.staticSamplers[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+		ssaoMainPass.staticSamplers[0].Filter = D3D12_FILTER_MIN_MAG_POINT_MIP_LINEAR;
+		ssaoMainPass.staticSamplers[0].MaxLOD = 0;
 
-		createRenderPass(voxelLightPass, &m_pLightPassRootSignature, &m_pLightVoxelPSO);
+		createRenderPass(ssaoMainPass, &m_pSSAOMainRS, &m_pSSAOMainPSO);
+
+
+		RenderPassSpecification ssaoBlurPass = ssaoMainPass;
+		ssaoBlurPass.csPath = SHADER_PATH / "SSAOBlurCS.hlsl";
+
+		D3D12_DESCRIPTOR_RANGE mainBufferRange = createRangeUAV(0, 0, 1, 0);
+		D3D12_DESCRIPTOR_RANGE ssaoBufferRange = createRangeUAV(1, 0, 1, 0);
+		ssaoBlurPass.rootParams =
+		{
+			createRootParamTable(D3D12_SHADER_VISIBILITY_ALL, &mainBufferRange, 1),
+			createRootParamTable(D3D12_SHADER_VISIBILITY_ALL, &ssaoBufferRange, 1),
+		};
+
+		ssaoBlurPass.staticSamplers = {};
+
+		createRenderPass(ssaoBlurPass, &m_pSSAOBlurRS, &m_pSSAOBlurPSO);
+
+
+		RenderPassSpecification lightingPass = ssaoMainPass;
+		lightingPass.csPath = SHADER_PATH / "LightingCS.hlsl";
+		lightingPass.rootParams =
+		{
+			createRootParamTable(D3D12_SHADER_VISIBILITY_ALL, &gBufferRange, 1),
+			createRootParamTable(D3D12_SHADER_VISIBILITY_ALL, &mainBufferRange, 1),
+			createRootParamTable(D3D12_SHADER_VISIBILITY_ALL, &ssaoBufferRange, 1),
+		};
+
+		createRenderPass(lightingPass, &m_pLightingPassRS, &m_pLightingPassPSO);
 	}
 
 	void Renderer::createSkyboxRenderPass()

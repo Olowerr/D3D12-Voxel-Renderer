@@ -1,8 +1,8 @@
 
 #include "GPUShared.hlsli"
-#include "SampleVectors.hlsli"
 
 static const float RADIUS = 0.5f;
+static const float BIAS = 0.1f;
 
 float ssaoSample(float3 worldPos, uint offsetIdx, float3 normal, float3x3 tbnMatrix)
 {
@@ -12,7 +12,6 @@ float ssaoSample(float3 worldPos, uint offsetIdx, float3 normal, float3x3 tbnMat
     worldPosGBuffer.GetDimensions(dims.x, dims.y);
     float2 texelSize = 1.f / (float2)dims;
     
-    //float3 offset = offsets[offsetIdx];
     float3 offset = mul(offsets[offsetIdx], tbnMatrix);
     if (dot(offset, normal) < 0.15f)
         return -1.f;
@@ -27,20 +26,22 @@ float ssaoSample(float3 worldPos, uint offsetIdx, float3 normal, float3x3 tbnMat
     
     float3 samplePos = worldPosGBuffer.SampleLevel(pointSampler, ndc.xy, 0.f).xyz;
 
-    float sampleDepth = length(renderCB.cameraPos - samplePos);
-    float pointDepth = length(renderCB.cameraPos - worldPos);
+    float sampleDepth = length(samplePos - renderCB.cameraPos);
+    float pointDepth = length(worldPos - renderCB.cameraPos);
     
-    if (abs(pointDepth - sampleDepth) > RADIUS)
+    float3 sampleToWorld = worldPos - samplePos;
+    if (dot(sampleToWorld, sampleToWorld) > RADIUS * RADIUS)
         return 1.f;
     
-    return sampleDepth > pointDepth - 0.2f ? 1.f : 0.f;
+    return sampleDepth > pointDepth - BIAS ? 1.f : 0.f;
 }
 
-float getSSAOValue(inout uint seed, float3 worldPos, float3 normal)
+float getSSAOValue(float3 worldPos, float3 normal, inout uint seed)
 {
-    float3 randomVec = randomVectors[pcgHash(seed) % 16];
-    float3 tangent = normalize(randomVec - normal * dot(randomVec, normal));
-    float3 biTangent = cross(tangent, normal);
+    const uint NUM_RANDOM_VECTORS = 16;
+    float3 randomVec = randomVectors[pcgHash(seed) % NUM_RANDOM_VECTORS];
+    float3 tangent = cross(normal, randomVec);
+    float3 biTangent = cross(normal, tangent);
     
     float3x3 tbnMatrix =
     {
@@ -48,8 +49,8 @@ float getSSAOValue(inout uint seed, float3 worldPos, float3 normal)
         biTangent,
         normal,
     };
-    
-    const uint NUM_SSAO_SAMPLES = 64; // 64 max atm
+
+    const uint NUM_SSAO_SAMPLES = 128; // 64 max atm
     float ssaoValue = 0.f;
     float numSamples = 0.f;
     for (uint i = 0; i < NUM_SSAO_SAMPLES; i++)
@@ -69,31 +70,28 @@ float getSSAOValue(inout uint seed, float3 worldPos, float3 normal)
 void main(uint3 DTid : SV_DispatchThreadID)
 {
     uint2 bbDims;
-    backBuffer.GetDimensions(bbDims.x, bbDims.y);
+    mainBuffer.GetDimensions(bbDims.x, bbDims.y);
     if (DTid.x >= bbDims.x || DTid.y >= bbDims.y)
         return;
 
-    Texture2D diffuseGBuffer = gBuffers[0];
     Texture2D worldPosGBuffer = gBuffers[1];
     Texture2D normalGBuffer = gBuffers[2];
     
-    float3 diffuse = diffuseGBuffer[DTid.xy].rgb;
     float3 worldPos = worldPosGBuffer[DTid.xy].xyz;
     float3 normal = normalGBuffer[DTid.xy].xyz;
+    if (normal.x == 0.f && normal.y == 0.f && normal.z == 0.f)
+    {
+        mainBuffer[DTid.xy] = float4(1.f, 1.f, 1.f, 0.f);
+        return;
+    }
     
     uint2 dims;
-    diffuseGBuffer.GetDimensions(dims.x, dims.y);
-
-    uint seed = DTid.x + (DTid.y + 74813) * dims.x;
-
-    float ssaoValue = getSSAOValue(seed, worldPos, normal);
-    backBuffer[DTid.xy] = float4(ssaoValue, ssaoValue, ssaoValue, 0.f);
-    return;
-
-    backBuffer[DTid.xy] = float4(diffuse.rgb * ssaoValue, 0.f);
-
-    float3 SUN_DIR = -normalize(float3(-0.469, -0.820, -0.327));
-    float lightIntensity = max(dot(SUN_DIR, normal), 0.3f) * 1.2f;
+    worldPosGBuffer.GetDimensions(dims.x, dims.y);
     
-    backBuffer[DTid.xy] = float4(diffuse.rgb * lightIntensity, 0.f);
+    uint seed = DTid.x + (DTid.y + 543978) * dims.x;
+
+    float ssaoValue = getSSAOValue(worldPos, normal, seed);
+    ssaoValue = pow(ssaoValue, 3.f);
+
+    mainBuffer[DTid.xy] = float4(ssaoValue, ssaoValue, ssaoValue, 0.f);
 }
