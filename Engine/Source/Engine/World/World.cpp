@@ -4,6 +4,8 @@
 #include "Camera.h"
 #include "Engine/Utilities/Random.h"
 
+#include "Engine/Application/Time.h"
+
 #include <shared_mutex>
 
 namespace Okay
@@ -69,48 +71,26 @@ namespace Okay
 
 		updateClouds(camera, dt);
 
-		std::unique_lock lock(mutis);
 		unloadDistantChunks();
 		processLoadingChunks();
 		tryLoadRenderEligableChunks(camera);
 	}
 
-	BlockType World::getBlockAtBlockCoord(const glm::ivec3& blockCoord) const
+	BlockType World::tryGetBlockThreaded(const glm::ivec3& blockCoord) const
 	{
-		if (blockCoord.y < 0 || blockCoord.y >= WORLD_HEIGHT)
-			return BlockType::AIR;
-
 		ChunkID chunkID = blockCoordToChunkID(blockCoord);
-
 		glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(blockCoord);
 		uint32_t chunkBlockIdx = chunkBlockCoordToChunkBlockIdx(chunkBlockCoord);
 
-		return tryGetBlock(chunkID, chunkBlockIdx);
-	}
-
-	BlockType World::tryGetBlock(ChunkID chunkID, uint32_t blockIdx) const
-	{
 		std::shared_lock lock(mutis);
 		const Chunk* pChunk = tryGetChunk(chunkID);
-		return pChunk ? pChunk->blocks[blockIdx] : BlockType::INVALID;
+		return pChunk ? pChunk->blocks[chunkBlockIdx] : BlockType::INVALID;
 	}
 
 	bool World::isBlockTypeSolid(BlockType block)
 	{
 		// TODO: Improve this lamo
-		return block != BlockType::AIR && block != BlockType::WATER && block != BlockType::OAK_LEAVES;
-	}
-
-	bool World::isBlockCoordSolid(const glm::ivec3& blockCoord) const
-	{
-		if (blockCoord.y < 0 || blockCoord.y >= WORLD_HEIGHT)
-			return false;
-
-		glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(blockCoord);
-		uint32_t chunkBlockIdx = chunkBlockCoordToChunkBlockIdx(chunkBlockCoord);
-
-		BlockType block = tryGetBlock(blockCoordToChunkID(blockCoord), chunkBlockIdx);
-		return isBlockTypeSolid(block);
+		return block != BlockType::INVALID && block != BlockType::AIR && block != BlockType::WATER && block != BlockType::OAK_LEAVES;
 	}
 
 	bool World::shouldPlaceTree(const glm::ivec3& blockCoord) const
@@ -126,23 +106,25 @@ namespace Okay
 		return noise >= m_worldGenData.treeThreshold;
 	}
 
-	void World::loadChunkStructures(ChunkID chunkID)
+	void World::cacheChunkStructures(ChunkID targetChunkID, ChunkID sourceChunkID)
 	{
+		std::shared_lock lock(mutis);
+		
+		auto chunkIt = m_chunksStructures.find(targetChunkID);
+		ChunkStructures* pChunkStructues = chunkIt != m_chunksStructures.end() ? &chunkIt->second : nullptr;
+
+		lock.unlock();
+
 		glm::ivec3 chunkBlockCoord = glm::ivec3(0);
 		for (chunkBlockCoord.x = 0; chunkBlockCoord.x < (int)CHUNK_WIDTH; chunkBlockCoord.x++)
 		{
 			for (chunkBlockCoord.z = 0; chunkBlockCoord.z < (int)CHUNK_WIDTH; chunkBlockCoord.z++)
 			{
-				glm::ivec3 blockCoord = chunkBlockCoordToBlockCoord(chunkID, chunkBlockCoord);
+				glm::ivec3 blockCoord = chunkBlockCoordToBlockCoord(sourceChunkID, chunkBlockCoord);
 				blockCoord.y = (int)findColoumnHeight(blockCoord);
 
 				if (!shouldPlaceTree(blockCoord))
 					continue;
-
-				ChunkStructures& chunkStructures = m_chunksStructures[chunkID];
-				uint32_t nextIdx = chunkStructures.numStructures;
-				if (nextIdx >= MAX_CHUNK_STRUCTURES)
-					return;
 
 				const StructureDescription& treeDesc = s_structureDescriptions[StructureType::TREE];
 
@@ -151,34 +133,52 @@ namespace Okay
 				glm::ivec3 minBounds = blockCoord - halfXZMaxBounds;
 				glm::ivec3 maxBounds = (blockCoord + treeDesc.boundsMax) - halfXZMaxBounds;
 
-				bool loaded = false;
-				for (const Structure& structure : chunkStructures.structures)
+				if (!pChunkStructues)
 				{
-					if (structure == Structure(StructureType::TREE, minBounds, maxBounds))
+					std::unique_lock lock(mutis);
+					pChunkStructues = &m_chunksStructures[targetChunkID];
+					pChunkStructues->structures.reserve(8);
+
+				}
+				else
+				{
+					bool loaded = false;
+					for (const Structure& structure : pChunkStructues->structures)
 					{
-						loaded = true;
-						break;
+						if (structure == Structure(StructureType::TREE, minBounds, maxBounds))
+						{
+							loaded = true;
+							break;
+						}
 					}
+
+					if (loaded)
+						continue;
 				}
 
-				if (loaded)
-					continue;
-
-				chunkStructures.structures[nextIdx].type = StructureType::TREE;
-				chunkStructures.structures[nextIdx].worldBoundsMin = blockCoord - halfXZMaxBounds;
-				chunkStructures.structures[nextIdx].worldBoundsMax = (blockCoord + treeDesc.boundsMax) - halfXZMaxBounds;
-				chunkStructures.numStructures++;
+				Structure& structure = pChunkStructues->structures.emplace_back();
+				structure.type = StructureType::TREE;
+				structure.worldBoundsMin = blockCoord - halfXZMaxBounds;
+				structure.worldBoundsMax = (blockCoord + treeDesc.boundsMax) - halfXZMaxBounds;
 			}
 		}
+
+		if (pChunkStructues)
+			pChunkStructues->structures.shrink_to_fit();
 	}
 
 	BlockType World::searchChunkForStructure(ChunkID chunkID, const glm::ivec3& blockCoord) const
 	{
-		const auto& chunkIt = m_chunksStructures.find(chunkID);
+		std::shared_lock lock(mutis);
+
+		auto chunkIt = m_chunksStructures.find(chunkID);
 		if (chunkIt == m_chunksStructures.end())
 			return BlockType::INVALID;
 
 		const ChunkStructures& chunkStructures = chunkIt->second;
+
+		lock.unlock();
+
 		for (const Structure& structure : chunkStructures.structures)
 		{
 			if (!structure.isWithinBounds(blockCoord))
@@ -197,29 +197,12 @@ namespace Okay
 
 	BlockType World::tryFindStructureBlock(const glm::ivec3& blockCoord) const
 	{
-		std::shared_lock lock(mutis);
-
-		const int searchWidth = 1;
 		ChunkID chunkID = blockCoordToChunkID(blockCoord);
-		glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkID);
-
-		glm::ivec2 offset = {};
-		for (offset.x = -searchWidth; offset.x <= searchWidth; offset.x++)
-		{
-			for (offset.y = -searchWidth; offset.y <= searchWidth; offset.y++)
-			{
-				ChunkID adjacentChunkID = chunkCoordToChunkID(chunkCoord + offset);
-				BlockType block = searchChunkForStructure(adjacentChunkID, blockCoord);
-
-				if (block != BlockType::INVALID)
-					return block;
-			}
-		}
-
-		return BlockType::AIR;
+		BlockType block = searchChunkForStructure(chunkID, blockCoord);
+		return block;
 	}
 
-	uint32_t World::findColoumnHeight(const glm::ivec3& blockCoordXZ)
+	uint32_t World::findColoumnHeight(const glm::ivec3& blockCoordXZ) const
 	{
 		float noise = Noise::samplePerlin2D_minusOneOne((float)blockCoordXZ.x, (float)blockCoordXZ.z, m_worldGenData.terrainNoiseData);
 		noise = m_worldGenData.terrrainNoiseInterpolation.sample(noise);
@@ -230,7 +213,7 @@ namespace Okay
 		return columnHeight;
 	}
 
-	BlockType World::generateBlock(const glm::ivec3& blockCoord)
+	BlockType World::generateBlock(const glm::ivec3& blockCoord) const
 	{
 		int columnHeight = (int)findColoumnHeight(blockCoord);
 		int grassDepth = 4;
@@ -245,10 +228,10 @@ namespace Okay
 			BlockType structBlockAbove = tryFindStructureBlock(blockCoord + glm::ivec3(0, 1, 0));
 			return isBlockTypeSolid(structBlockAbove) || belowGround ? BlockType::DIRT : BlockType::GRASS;
 		}
-		
+
 		if (blockCoord.y >= columnHeight && blockCoord.y < (int)m_worldGenData.oceanHeight)
 			return BlockType::WATER;
-	
+
 		BlockType structureBlock = tryFindStructureBlock(blockCoord);
 		if (structureBlock != BlockType::INVALID)
 			return structureBlock;
@@ -395,6 +378,8 @@ namespace Okay
 
 	void World::unloadDistantChunks()
 	{
+		std::unique_lock lock(mutis, std::defer_lock_t());
+
 		auto chunkIterator = m_loadedChunks.begin();
 		while (chunkIterator != m_loadedChunks.end())
 		{
@@ -405,15 +390,19 @@ namespace Okay
 				continue;
 			}
 
+			if (!lock.owns_lock())
+				lock.lock();
+
 			chunkIterator = m_loadedChunks.erase(chunkIterator);
 			m_chunksStructures.erase(chunkID);
-
 			m_removedChunks.emplace_back(chunkID);
 		}
 	}
 
 	void World::processLoadingChunks()
 	{
+		std::unique_lock lock(mutis, std::defer_lock_t());
+
 		auto chunkIterator = m_loadingChunks.begin();
 		while (chunkIterator != m_loadingChunks.end())
 		{
@@ -430,6 +419,9 @@ namespace Okay
 				chunkIterator = m_loadingChunks.erase(chunkIterator);
 				continue;
 			}
+
+			if (!lock.owns_lock())
+				lock.lock();
 
 			m_loadedChunks[chunkID] = chunkGeneration.chunk;
 			m_addedChunks.emplace_back(chunkID);
@@ -453,7 +445,7 @@ namespace Okay
 				{
 					glm::ivec2 chunkCoord = m_currentCamChunkCoord + glm::ivec2(chunkX, chunkZ);
 					ChunkID chunkID = chunkCoordToChunkID(chunkCoord);
-					
+
 					if (!isChunkWithinRenderDistance(chunkID) || !isChunkInView(camera, chunkID))
 						continue;
 
@@ -467,7 +459,7 @@ namespace Okay
 
 					if (isChunkLoading(chunkID))
 						continue;
-					
+
 					launchChunkGenerationThread(chunkID);
 				}
 			}
@@ -508,11 +500,30 @@ namespace Okay
 	{
 		return m_removedChunks;
 	}
-	
+
 	void World::generateChunk(ChunkGeneration* pChunkGeneration)
 	{
+		/*
+			try moving stuctrure generation into here
+			so this thread generates the structures of this and the adjacent chunks and caches the result to send into generateBlock
+			buuuut actually not sure if this works cuz Renderer also calls World::generateBlock()...
+			need better solution...
+		*/
+
 		ChunkID chunkID = pChunkGeneration->chunkID;
 		Chunk& chunk = pChunkGeneration->chunk;
+
+		const int loadWidth = 1;
+		glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkID);
+
+		for (int offsetX = -loadWidth; offsetX <= loadWidth; offsetX++)
+		{
+			for (int offsetZ = -loadWidth; offsetZ <= loadWidth; offsetZ++)
+			{
+				ChunkID adjacentChunkID = chunkCoordToChunkID(chunkCoord + glm::ivec2(offsetX, offsetZ));
+				cacheChunkStructures(chunkID, adjacentChunkID);
+			}
+		}
 
 		for (uint32_t i = 0; i < MAX_BLOCKS_IN_CHUNK; i++)
 		{
@@ -524,26 +535,15 @@ namespace Okay
 
 	void World::launchChunkGenerationThread(ChunkID chunkID)
 	{
-		const int loadWidth = 1;
-		glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkID);
-		for (int offsetX = -loadWidth; offsetX <= loadWidth; offsetX++)
-		{
-			for (int offsetZ = -loadWidth; offsetZ <= loadWidth; offsetZ++)
-			{
-				ChunkID adjacentChunkID = chunkCoordToChunkID(chunkCoord + glm::ivec2(offsetX, offsetZ));
-				loadChunkStructures(adjacentChunkID);
-			}
-		}
-
 		ChunkGeneration& chunkGeneration = m_loadingChunks[chunkID];
 		chunkGeneration.chunkID = chunkID;
 		chunkGeneration.threadFinished.store(false);
 
 		ChunkGeneration* pChunkGeneration = &chunkGeneration;
 		m_threadPool.queueJob([=]()
-		{
-			generateChunk(pChunkGeneration);
-			pChunkGeneration->threadFinished.store(true);
-		});
+			{
+				generateChunk(pChunkGeneration);
+				pChunkGeneration->threadFinished.store(true);
+			});
 	}
 }

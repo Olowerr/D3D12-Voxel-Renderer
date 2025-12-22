@@ -24,13 +24,13 @@ namespace Okay
 		InterpolationList(ListPoint start, ListPoint end);
 
 		void addPoint(float position, float value);
-		float sample(float position);
+		float sample(float position) const;
 
 		const std::vector<ListPoint>& getPoints() const;
 		void updatePoint(uint64_t index, float position, float value);
 
 	private:
-		uint64_t findPositionIdx(float position);
+		uint64_t findPositionIdx(float position) const;
 
 	private:
 		std::vector<ListPoint> m_points;

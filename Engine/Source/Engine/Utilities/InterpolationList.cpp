@@ -22,11 +22,11 @@ namespace Okay
 		m_points.emplace(m_points.begin() + index + 1, position, value);
 	}
 
-	float InterpolationList::sample(float position)
+	float InterpolationList::sample(float position) const
 	{
 		uint64_t firstSampleIdx = findPositionIdx(position);
-		ListPoint& firstSamplePoint = m_points[firstSampleIdx];
-		ListPoint& secondSamplePoint = m_points[firstSampleIdx + 1];
+		const ListPoint& firstSamplePoint = m_points[firstSampleIdx];
+		const ListPoint& secondSamplePoint = m_points[firstSampleIdx + 1];
 
 		float alpha = (position - firstSamplePoint.position) / (secondSamplePoint.position - firstSamplePoint.position);
 		return glm::mix(firstSamplePoint.value, secondSamplePoint.value, glm::smoothstep(0.f, 1.f, alpha));
@@ -46,7 +46,7 @@ namespace Okay
 			});
 	}
 
-	uint64_t InterpolationList::findPositionIdx(float position)
+	uint64_t InterpolationList::findPositionIdx(float position) const
 	{
 		uint64_t index = INVALID_UINT64;
 		for (uint64_t i = 0; i < m_points.size() - 1; i++)

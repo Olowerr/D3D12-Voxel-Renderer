@@ -5,8 +5,6 @@
 
 namespace Okay
 {
-	constexpr uint32_t MAX_CHUNK_STRUCTURES = 10;
-
 	enum class StructureType
 	{
 		NONE = 0,
@@ -39,9 +37,7 @@ namespace Okay
 	struct ChunkStructures
 	{
 		ChunkStructures() = default;
-
-		Structure structures[MAX_CHUNK_STRUCTURES] = {};
-		uint32_t numStructures = 0;
+		std::vector<Structure> structures;
 	};
 
 	struct BlockDescription

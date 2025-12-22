@@ -13,6 +13,6 @@ protected:
 
 private:
 	void updateCamera(Okay::TimeStep dt);
-	void handleImgui();
+	void handleImgui(Okay::TimeStep dt);
 
 };

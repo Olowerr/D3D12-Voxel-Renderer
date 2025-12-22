@@ -16,7 +16,7 @@ App::App()
 void App::onUpdate(TimeStep dt)
 {
 	updateCamera(dt);
-	handleImgui();
+	handleImgui(dt);
 
 	static TimeStep passedTime = 0;
 	static uint32_t numFrames = 0;
@@ -113,8 +113,21 @@ static bool imguiNoiseSamplingControls(Noise::SamplingData& samplingData, std::s
 	return changed;
 }
 
-void App::handleImgui()
+void App::handleImgui(TimeStep dt)
 {
+	static TimeStep passedTime = 0;
+	static uint32_t numFrames = 0;
+	static TimeStep avgDT = 1.f;
+	passedTime += dt;
+	numFrames++;
+
+	if (passedTime > 1.f)
+	{
+		avgDT = passedTime / (float)numFrames;
+		passedTime -= 1.f;
+		numFrames = 0;
+	}
+
 	if (ImGui::Begin("Core"))
 	{
 		ImGui::PushItemWidth(150.f);
@@ -124,6 +137,11 @@ void App::handleImgui()
 		ChunkID camChunkID = blockCoordToChunkID(glm::floor(m_camera.transform.position));
 		glm::ivec2 camChunkPos = chunkIDToChunkCoord(camChunkID);
 		
+		ImGui::Text("Avg FPS: %u (%.4f)", uint32_t(1.f / avgDT), avgDT);
+		ImGui::Text("Raw FPS: %u (%.4f)", uint32_t(1.f / dt), dt);
+
+		ImGui::Separator();
+
 		ImGui::Text("Camera");
 		ImGui::Text("Position: (%.2f, %.2f, %.2f)", camPos.x, camPos.y, camPos.z);
 		ImGui::Text("Rotation: (%.2f, %.2f, %.2f)", camRot.x, camRot.y, camRot.z);

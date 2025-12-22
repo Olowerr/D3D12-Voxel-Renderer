@@ -194,9 +194,9 @@ namespace Okay
 		void writeMeshData(GPUMeshInfo& gpuMeshInfo, const MeshData& meshData);
 		void findAndDeleteDXChunk(ChunkID chunkID);
 
-		void generateChunkMesh(const World* pWorld, ChunkID chunkID, uint32_t chunkGenID, ChunkMeshData& outMeshData);
-		void addBlockMeshData(const World* pWorld, BlockType block, const glm::ivec3& chunkBlockCoord, const glm::ivec3& worldBlockCoord, MeshData& outMeshData);
-		void addWaterMeshData(const World* pWorld, const glm::ivec3& chunkBlockCoord, const glm::ivec3& worldBlockCoord, MeshData& outMeshData);
+		void generateChunkMesh(const World* pWorld, ChunkID chunkID, Chunk* pChunkData, uint32_t chunkGenID, ChunkMeshData& outMeshData);
+		void addBlockMeshData(const World* pWorld, BlockType block, ChunkID chunkId, Chunk* pChunkData, const glm::ivec3& worldBlockCoord, MeshData& outMeshData);
+		void addWaterMeshData(Chunk* pChunkData, const glm::ivec3& worldBlockCoord, MeshData& outMeshData);
 
 		D3D12_CPU_DESCRIPTOR_HANDLE createRTVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc);
 		D3D12_CPU_DESCRIPTOR_HANDLE createDSVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_DEPTH_STENCIL_VIEW_DESC* pDesc);

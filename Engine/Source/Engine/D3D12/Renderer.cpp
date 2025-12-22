@@ -387,13 +387,13 @@ namespace Okay
 		frame.pCommandList->CopyBufferRegion(pTarget, targetOffset, frame.ringBuffer.getDXResource(), uploadBufferOffset, dataSize);
 	}
 
-	static void addVertex(std::vector<uint32_t>& indices, std::vector<Vertex>& verticiesData, Vertex newVertex)
+	static void addVertex(MeshData& meshData, Vertex newVertex)
 	{
 		uint32_t idx = INVALID_UINT32;
-		int startIdx = glm::max((int)verticiesData.size() - 5, 0); // Lmao
-		for (uint64_t i = startIdx; i < verticiesData.size(); i++)
+		int startIdx = glm::max((int)meshData.vertices.size() - 5, 0); // Lmao
+		for (uint64_t i = startIdx; i < meshData.vertices.size(); i++)
 		{
-			if (verticiesData[i] == newVertex)
+			if (meshData.vertices[i] == newVertex)
 			{
 				idx = (uint32_t)i;
 				break;
@@ -402,16 +402,38 @@ namespace Okay
 
 		if (idx == INVALID_UINT32)
 		{
-			indices.emplace_back((uint32_t)verticiesData.size());
-			verticiesData.emplace_back(newVertex);
+			meshData.indices.emplace_back((uint32_t)meshData.vertices.size());
+			meshData.vertices.emplace_back(newVertex);
 		}
 		else
 		{
-			indices.emplace_back(idx);
+			meshData.indices.emplace_back(idx);
 		}
 	}
 
-	void Renderer::generateChunkMesh(const World* pWorld, ChunkID chunkID, uint32_t chunkGenID, ChunkMeshData& outMeshData)
+	static bool checkSolidBlock(const glm::ivec3& blockCoord, ChunkID chunkID, Chunk* pChunkData, const World* pWorld)
+	{
+		if (blockCoord.y < 0 || blockCoord.y >= WORLD_HEIGHT)
+			return false;
+
+		BlockType block = BlockType::INVALID;
+		if (blockCoordToChunkID(blockCoord) == chunkID)
+		{
+			glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(blockCoord);
+			uint32_t chunkBlockIdx = chunkBlockCoordToChunkBlockIdx(chunkBlockCoord);
+			block = pChunkData->blocks[chunkBlockIdx];
+		}
+		else
+		{
+			block = pWorld->tryGetBlockThreaded(blockCoord);
+			if (block == BlockType::INVALID)
+				return true;
+		}
+
+		return World::isBlockTypeSolid(block);
+	}
+
+	void Renderer::generateChunkMesh(const World* pWorld, ChunkID chunkID, Chunk* pChunkData, uint32_t chunkGenID, ChunkMeshData& outMeshData)
 	{
 		glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkID);
 		glm::ivec3 worldCoord = chunkCoordToWorldCoord(chunkCoord);
@@ -436,130 +458,139 @@ namespace Okay
 
 			lock.unlock();
 
-
-			BlockType block = pWorld->tryGetBlock(chunkID, i);
-			if (block == BlockType::INVALID) // Chunk is no longer loaded
-				return;
-
+			// way to cancel mesh building if chunk unloads? but it's kinda rare no? mesh building isn't that slow
+			BlockType block = pChunkData->blocks[i];
 			if (block == BlockType::AIR)
 				continue;
-
-
+			
 			glm::ivec3 chunkBlockCoord = chunkBlockIdxToChunkBlockCoord(i);
 			glm::ivec3 worldBlockCoord = chunkBlockCoord + worldCoord;
 
 			if (block == BlockType::WATER)
 			{
-				addWaterMeshData(pWorld, chunkBlockCoord, worldBlockCoord, outMeshData.waterMesh);
+				addWaterMeshData(pChunkData, worldBlockCoord, outMeshData.waterMesh);
 			}
 			else
 			{
-				addBlockMeshData(pWorld, block, chunkBlockCoord, worldBlockCoord, outMeshData.blockMesh);
+				addBlockMeshData(pWorld, block, chunkID, pChunkData, worldBlockCoord, outMeshData.blockMesh);
 			}
 		}
 	}
 
-	void Renderer::addBlockMeshData(const World* pWorld, BlockType block, const glm::ivec3& chunkBlockCoord, const glm::ivec3& worldBlockCoord, MeshData& outMeshData)
+	void Renderer::addBlockMeshData(const World* pWorld, BlockType block, ChunkID chunkId, Chunk* pChunkData, const glm::ivec3& worldBlockCoord, MeshData& outMeshData)
 	{
 		// Top
-		if (!pWorld->isBlockCoordSolid(worldBlockCoord + UP_DIR))
+		if (!checkSolidBlock(worldBlockCoord + UP_DIR, chunkId, pChunkData, pWorld))
 		{
 			uint32_t textureId = getTextureID(block, BlockSide::TOP);
+			glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(worldBlockCoord);
 
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 0));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 1), textureId, 0));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId, 0));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 0));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 1), textureId, 0));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId, 0));
 
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId, 0));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId, 0));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 0));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId, 0));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId, 0));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 0));
 		}
 
 		// Bottom
-		if (!pWorld->isBlockCoordSolid(worldBlockCoord - UP_DIR))
+		if (!checkSolidBlock(worldBlockCoord - UP_DIR, chunkId, pChunkData, pWorld))
 		{
 			uint32_t textureId = getTextureID(block, BlockSide::BOTTOM);
+			glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(worldBlockCoord);
 
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 1));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 0), textureId, 1));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), textureId, 1));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 1));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 0), textureId, 1));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), textureId, 1));
 
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), textureId, 1));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), textureId, 1));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 1));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), textureId, 1));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), textureId, 1));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 1));
 		}
 
 		// Right
-		if (!pWorld->isBlockCoordSolid(worldBlockCoord + RIGHT_DIR))
+		if (!checkSolidBlock(worldBlockCoord + RIGHT_DIR, chunkId, pChunkData, pWorld))
 		{
 			uint32_t textureId = getTextureID(block, BlockSide::SIDE);
+			glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(worldBlockCoord);
 
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId, 2));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(1, 0), textureId, 2));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 2));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId, 2));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(1, 0), textureId, 2));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 2));
 
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId, 2));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 2));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), textureId, 2));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId, 2));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 2));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), textureId, 2));
 		}
 
 		// Left
-		if (!pWorld->isBlockCoordSolid(worldBlockCoord - RIGHT_DIR))
+		if (!checkSolidBlock(worldBlockCoord - RIGHT_DIR, chunkId, pChunkData, pWorld))
 		{
 			uint32_t textureId = getTextureID(block, BlockSide::SIDE);
+			glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(worldBlockCoord);
 
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), textureId, 3));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(0, 0), textureId, 3));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 3));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), textureId, 3));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(0, 0), textureId, 3));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 3));
 
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(1, 1), textureId, 3));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), textureId, 3));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 3));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(1, 1), textureId, 3));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), textureId, 3));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 3));
 		}
 
 		// Forward
-		if (!pWorld->isBlockCoordSolid(worldBlockCoord + FORWARD_DIR))
+		if (!checkSolidBlock(worldBlockCoord + FORWARD_DIR, chunkId, pChunkData, pWorld))
 		{
 			uint32_t textureId = getTextureID(block, BlockSide::SIDE);
+			glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(worldBlockCoord);
 
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), textureId, 4));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 0), textureId, 4));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), textureId, 4));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), textureId, 4));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 0), textureId, 4));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), textureId, 4));
 
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), textureId, 4));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(0, 1), textureId, 4));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), textureId, 4));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), textureId, 4));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(0, 1), textureId, 4));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), textureId, 4));
 		}
 
 		// Backward
-		if (!pWorld->isBlockCoordSolid(worldBlockCoord - FORWARD_DIR))
+		if (!checkSolidBlock(worldBlockCoord - FORWARD_DIR, chunkId, pChunkData, pWorld))
 		{
 			uint32_t textureId = getTextureID(block, BlockSide::SIDE);
+			glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(worldBlockCoord);
 
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), textureId, 5));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(0, 0), textureId, 5));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), textureId, 5));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), textureId, 5));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(0, 0), textureId, 5));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), textureId, 5));
 
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), textureId, 5));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(1, 1), textureId, 5));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), textureId, 5));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), textureId, 5));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(1, 1), textureId, 5));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), textureId, 5));
 		}
 	}
 
-	void Renderer::addWaterMeshData(const World* pWorld, const glm::ivec3& chunkBlockCoord, const glm::ivec3& worldBlockCoord, MeshData& outMeshData)
+	void Renderer::addWaterMeshData(Chunk* pChunkData, const glm::ivec3& worldBlockCoord, MeshData& outMeshData)
 	{
-		// Top
-		if (pWorld->getBlockAtBlockCoord(worldBlockCoord + UP_DIR) != BlockType::WATER)
+		glm::ivec3 aboveBlockCoord = worldBlockCoord + UP_DIR;
+		if (aboveBlockCoord.y >= WORLD_HEIGHT)
+			return;
+
+		glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(aboveBlockCoord);
+		uint32_t chunkBlockIdx = chunkBlockCoordToChunkBlockIdx(chunkBlockCoord);
+
+		if (pChunkData->blocks[chunkBlockIdx] != BlockType::WATER)
 		{
 			uint32_t textureId = getTextureID(BlockType::WATER, BlockSide::SIDE);
+			glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(worldBlockCoord);
 
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 1), textureId));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 1), textureId));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId));
 
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId));
-			addVertex(outMeshData.indices, outMeshData.vertices, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId));
+			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId));
 		}
 	}
 
@@ -570,7 +601,6 @@ namespace Okay
 			findAndDeleteDXChunk(chunkID);
 		}
 
-		std::unique_lock lock(s_loadingChunksMutis);
 		processAddedChunks(world);
 		processLoadingChunkMeshes(world);
 	}
@@ -580,12 +610,14 @@ namespace Okay
 		// Not sure if should be static or not, prolly doesn't really matter :3
 		static const glm::ivec2 OFFSETS[] =
 		{
-			glm::ivec2( 0,  0),
+			glm::ivec2(0,  0),
 			glm::ivec2(-1,  0),
-			glm::ivec2( 1,  0),
-			glm::ivec2( 0, -1),
-			glm::ivec2( 0,  1),
+			glm::ivec2(1,  0),
+			glm::ivec2(0, -1),
+			glm::ivec2(0,  1),
 		};
+
+		std::unique_lock lock(s_loadingChunksMutis, std::defer_lock_t());
 
 		for (ChunkID chunkID : world.getAddedChunks())
 		{
@@ -597,27 +629,34 @@ namespace Okay
 					continue;
 
 				uint32_t chunkGenID = INVALID_UINT32;
-				auto adjacentChunkIterator = m_loadingChunkMesh.find(adjacentChunkID);
+				auto adjacentChunkIt = m_loadingChunkMesh.find(adjacentChunkID);
 
-				if (adjacentChunkIterator != m_loadingChunkMesh.end())
+				if (adjacentChunkIt != m_loadingChunkMesh.end())
 				{
-					ThreadSafeChunkMesh& chunkMesh = adjacentChunkIterator->second;
+					ThreadSafeChunkMesh& chunkMesh = adjacentChunkIt->second;
 					chunkGenID = ++chunkMesh.latestChunkGenID;
 					chunkMesh.meshGenerated.store(false);
 				}
 				else
 				{
+					if (!lock.owns_lock())
+						lock.lock();
+
 					ThreadSafeChunkMesh& chunkMesh = m_loadingChunkMesh[adjacentChunkID];
 					chunkMesh.latestChunkGenID = 0;
 					chunkGenID = 0;
 					chunkMesh.meshGenerated.store(false);
-				}	
+				}
+
+				// Copy so the mesh thread can run independently
+				Chunk* pChunkData = new Chunk(world.getChunkConst(adjacentChunkID));
 
 				const World* pWorld = &world;
 				m_threadPool.queueJob([=]()
 					{
 						ChunkMeshData outMeshData;
-						generateChunkMesh(pWorld, adjacentChunkID, chunkGenID, outMeshData);
+						generateChunkMesh(pWorld, adjacentChunkID, pChunkData, chunkGenID, outMeshData);
+						delete pChunkData;
 
 						std::shared_lock lock(s_loadingChunksMutis);
 						auto chunkIterator = m_loadingChunkMesh.find(adjacentChunkID);
@@ -637,9 +676,11 @@ namespace Okay
 
 	void Renderer::processLoadingChunkMeshes(const World& world)
 	{
-		FrameResources& frame = getCurrentFrameResorces();
+		std::unique_lock lock(s_loadingChunksMutis, std::defer_lock_t());
 
+		FrameResources& frame = getCurrentFrameResorces();
 		bool meshResourcesTranitioned = false;
+
 		auto chunkIterator = m_loadingChunkMesh.begin();
 		while (chunkIterator != m_loadingChunkMesh.end())
 		{
@@ -653,6 +694,9 @@ namespace Okay
 			ChunkID chunkID = chunkIterator->first;
 			if (!world.isChunkLoaded(chunkID))
 			{
+				if (!lock.owns_lock())
+					lock.lock();
+
 				chunkIterator = m_loadingChunkMesh.erase(chunkIterator);
 				continue;
 			}
@@ -670,6 +714,9 @@ namespace Okay
 			dxChunk.chunkID = chunkID;
 			writeMeshData(dxChunk.blockGPUMeshInfo, threadChunk.meshData.blockMesh);
 			writeMeshData(dxChunk.waterGPUMeshInfo, threadChunk.meshData.waterMesh);
+
+			if (!lock.owns_lock())
+				lock.lock();
 
 			chunkIterator = m_loadingChunkMesh.erase(chunkIterator);
 		}

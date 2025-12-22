@@ -65,6 +65,9 @@ namespace Okay
 	class World
 	{
 	public:
+		static bool isBlockTypeSolid(BlockType block);
+
+	public:
 		World() = default;
 		~World() = default;
 
@@ -73,17 +76,10 @@ namespace Okay
 
 		void update(const Camera& camera, TimeStep dt);
 
-		BlockType getBlockAtBlockCoord(const glm::ivec3& blockCoord) const;
-		BlockType tryGetBlock(ChunkID chunkID, uint32_t blockIdx) const;
-
-		static bool isBlockTypeSolid(BlockType block);
-		bool isBlockCoordSolid(const glm::ivec3& blockCoord) const;
-
-		BlockType generateBlock(const glm::ivec3& blockCoord);
+		BlockType tryGetBlockThreaded(const glm::ivec3& blockCoord) const;
 
 		Chunk& getChunk(ChunkID chunkID);
 		const Chunk& getChunkConst(ChunkID chunkID) const;
-
 		const Chunk* tryGetChunk(ChunkID chunkID) const;
 		bool isChunkLoaded(ChunkID chunkID) const;
 
@@ -102,14 +98,15 @@ namespace Okay
 
 	private:
 		void launchChunkGenerationThread(ChunkID chunkID);
+		BlockType generateBlock(const glm::ivec3& blockCoord) const;
 		void generateChunk(ChunkGeneration* pChunkGeneration);
 		bool shouldPlaceTree(const glm::ivec3& blockCoordXZ) const;
-		uint32_t findColoumnHeight(const glm::ivec3& blockCoordXZ);
+		uint32_t findColoumnHeight(const glm::ivec3& blockCoordXZ) const;
 
-		void loadChunkStructures(ChunkID chunkID);
+		void cacheChunkStructures(ChunkID targetChunkID, ChunkID sourceChunkID);
 		BlockType searchChunkForStructure(ChunkID chunkID, const glm::ivec3& blockCoord) const;
 		BlockType tryFindStructureBlock(const glm::ivec3& blockCoord) const;
-		
+
 		void clearUpdatedChunks();
 		void unloadDistantChunks();
 		void processLoadingChunks();
@@ -133,6 +130,8 @@ namespace Okay
 
 		std::unordered_map<ChunkID, Chunk> m_loadedChunks;
 		std::unordered_map<ChunkID, ChunkGeneration> m_loadingChunks;
+
+		// Move into Chunk?
 		std::unordered_map<ChunkID, ChunkStructures> m_chunksStructures;
 
 		std::vector<ChunkID> m_addedChunks;
