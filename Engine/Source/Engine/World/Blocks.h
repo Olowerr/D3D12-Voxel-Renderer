@@ -46,9 +46,24 @@ X(OAK_LEAVES, 6) \
 		BOTTOM = 2,
 	};
 
-	struct BlockTextures
+	struct SideTextureIDs // Indices match BlockSide enum
 	{
-		std::string textures[3] = {};
+		SideTextureIDs()
+		{
+			for (uint8_t& id : IDs)
+				id = INVALID_UINT8;
+		}
+		uint8_t IDs[3] = {};
 	};
-	void findBlockTextures(std::unordered_map<BlockType, BlockTextures>& outTextures);
+	
+	struct SideTextureNames
+	{
+		std::string names[3] = {};
+	};
+
+	using BlockTextureNames = std::unordered_map<BlockType, SideTextureNames>;
+	using BlockTextureIDs = std::unordered_map<BlockType, SideTextureIDs>;
+	using TextureNameIDs = std::unordered_map<std::string, uint32_t>;
+
+	void findBlockTextures(std::unordered_map<BlockType, SideTextureNames>& outTextures);
 }

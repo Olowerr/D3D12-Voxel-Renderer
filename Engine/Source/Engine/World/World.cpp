@@ -3,77 +3,47 @@
 #include "Engine/Application/Window.h"
 #include "Camera.h"
 #include "Engine/Utilities/Random.h"
-
 #include "Engine/Application/Time.h"
-
-#include <shared_mutex>
+#include "ChunkGenerator.h"
+#include "Engine/World/WorldGenSettings.h"
+#include "Engine/Utilities/Utilities.h"
 
 namespace Okay
 {
-	const float CloudGenerationData::UPDATE_INTERVAL = 10.f;
-
-	static std::shared_mutex mutis;
-	static std::unordered_map<StructureType, StructureDescription> s_structureDescriptions;
-
 	void World::initialize()
 	{
-		applySeed();
-
-		uint32_t numThreads = glm::max(uint32_t(std::thread::hardware_concurrency() * 0.5), 1u);
-		m_threadPool.initialize(numThreads);
-
-		m_worldGenData.terrrainNoiseInterpolation.addPoint(-0.45f, -0.55f);
-		m_worldGenData.terrrainNoiseInterpolation.addPoint(-0.1f, 0.f);
-		m_worldGenData.terrrainNoiseInterpolation.addPoint(0.f, 0.1f);
-		m_worldGenData.terrrainNoiseInterpolation.addPoint(0.275f, 0.15f);
-		m_worldGenData.terrrainNoiseInterpolation.addPoint(0.65f, 0.525f);
-
-		m_worldGenData.terrainNoiseData.numOctaves = 4;
-		m_worldGenData.terrainNoiseData.frequencyNumerator = 1.f;
-		m_worldGenData.terrainNoiseData.frequencyDenominator = 150.f;
-
-		m_worldGenData.treeNoiseData.numOctaves = 2;
-		m_worldGenData.treeNoiseData.frequencyNumerator = 0.835f;
-		m_worldGenData.treeNoiseData.frequencyDenominator = 1.f;
-		m_worldGenData.treeNoiseData.exponent = 3.39f;
-
-		m_worldGenData.treeAreaNoiseData.frequencyDenominator = 100.f;
-		m_worldGenData.treeAreaNoiseThreshold = 0.46f;
-		m_worldGenData.treeMaxSpawnAltitude = 83;
-
-		s_structureDescriptions[StructureType::TREE] = createTreeDescription();
-
-
-		m_cloudGenData.cloudNoise.numOctaves = 1;
-		m_cloudGenData.cloudNoise.frequencyNumerator = 1.f;
-		m_cloudGenData.cloudNoise.frequencyDenominator = 67.f;
-		m_cloudGenData.cloudNoise.persistence = 0.5f;
-		m_cloudGenData.cloudNoise.cutOff = 0.f;
-		m_cloudGenData.cloudNoise.exponent = 1.35f;
-
-		m_cloudGenData.maskNoise.numOctaves = 5;
-		m_cloudGenData.maskNoise.frequencyNumerator = 1.f;
-		m_cloudGenData.maskNoise.frequencyDenominator = 147.f;
-		m_cloudGenData.maskNoise.persistence = 0.48f;
-		m_cloudGenData.maskNoise.cutOff = 0.64f;
-		m_cloudGenData.maskNoise.exponent = 1.f;
 	}
 
 	void World::shutdown()
 	{
-		m_threadPool.shutdown();
 	}
 
-	void World::update(const Camera& camera, TimeStep dt)
+	void World::update(const Camera& camera, const ChunkGenerator& chunkGenerator, TimeStep dt)
 	{
+		if (WorldGenerationData::get().pauseGen)
+			return;
+
 		clearUpdatedChunks();
-		m_currentCamChunkCoord = chunkIDToChunkCoord(blockCoordToChunkID(glm::floor(camera.transform.position)));
+
+		std::unique_lock lock(m_chunkMutex, std::defer_lock_t());
+		for (ChunkGenID chunkGenID : chunkGenerator.getCompletedChunks())
+		{
+			const ChunkGenerationThread& chunkGen = chunkGenerator.getChunkGenData(chunkGenID);
+			ChunkID chunkID = chunkGen.chunkID;
+
+			if (m_loadedChunks.contains(chunkID))
+				continue;
+
+			if (!lock.owns_lock())
+				lock.lock();
+
+			m_loadedChunks[chunkID] = chunkGen.chunkData;
+		}
+		if (lock.owns_lock())
+			lock.unlock();
 
 		updateClouds(camera, dt);
-
-		unloadDistantChunks();
-		processLoadingChunks();
-		tryLoadRenderEligableChunks(camera);
+		unloadDistantChunks(camera);
 	}
 
 	BlockType World::tryGetBlockThreaded(const glm::ivec3& blockCoord) const
@@ -82,247 +52,98 @@ namespace Okay
 		glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(blockCoord);
 		uint32_t chunkBlockIdx = chunkBlockCoordToChunkBlockIdx(chunkBlockCoord);
 
-		std::shared_lock lock(mutis);
+		std::shared_lock lock(m_chunkMutex);
 		const Chunk* pChunk = tryGetChunk(chunkID);
 		return pChunk ? pChunk->blocks[chunkBlockIdx] : BlockType::INVALID;
 	}
 
-	bool World::isBlockTypeSolid(BlockType block)
-	{
-		// TODO: Improve this lamo
-		return block != BlockType::INVALID && block != BlockType::AIR && block != BlockType::WATER && block != BlockType::OAK_LEAVES;
-	}
-
-	bool World::shouldPlaceTree(const glm::ivec3& blockCoord) const
-	{
-		if (blockCoord.y < (int)m_worldGenData.oceanHeight || blockCoord.y > (int)m_worldGenData.treeMaxSpawnAltitude)
-			return false;
-
-		float areaNoise = Noise::samplePerlin2D_zeroOne((float)blockCoord.x, (float)blockCoord.z, m_worldGenData.treeAreaNoiseData);
-		if (areaNoise < m_worldGenData.treeAreaNoiseThreshold)
-			return false;
-
-		float noise = Noise::samplePerlin2D_zeroOne((float)blockCoord.x, (float)blockCoord.z, m_worldGenData.treeNoiseData);
-		return noise >= m_worldGenData.treeThreshold;
-	}
-
-	void World::cacheChunkStructures(ChunkID targetChunkID, ChunkID sourceChunkID)
-	{
-		std::shared_lock lock(mutis);
-		
-		auto chunkIt = m_chunksStructures.find(targetChunkID);
-		ChunkStructures* pChunkStructues = chunkIt != m_chunksStructures.end() ? &chunkIt->second : nullptr;
-
-		lock.unlock();
-
-		glm::ivec3 chunkBlockCoord = glm::ivec3(0);
-		for (chunkBlockCoord.x = 0; chunkBlockCoord.x < (int)CHUNK_WIDTH; chunkBlockCoord.x++)
-		{
-			for (chunkBlockCoord.z = 0; chunkBlockCoord.z < (int)CHUNK_WIDTH; chunkBlockCoord.z++)
-			{
-				glm::ivec3 blockCoord = chunkBlockCoordToBlockCoord(sourceChunkID, chunkBlockCoord);
-				blockCoord.y = (int)findColoumnHeight(blockCoord);
-
-				if (!shouldPlaceTree(blockCoord))
-					continue;
-
-				const StructureDescription& treeDesc = s_structureDescriptions[StructureType::TREE];
-
-				// vec division in glm is defined as: vec * (1 / scalar), so the result is always 0 when using interger types and the scalar > 1 .-.
-				glm::ivec3 halfXZMaxBounds = (glm::vec3)glm::ivec3(treeDesc.boundsMax.x, 0, treeDesc.boundsMax.z) / 2.f;
-				glm::ivec3 minBounds = blockCoord - halfXZMaxBounds;
-				glm::ivec3 maxBounds = (blockCoord + treeDesc.boundsMax) - halfXZMaxBounds;
-
-				if (!pChunkStructues)
-				{
-					std::unique_lock lock(mutis);
-					pChunkStructues = &m_chunksStructures[targetChunkID];
-					pChunkStructues->structures.reserve(8);
-
-				}
-				else
-				{
-					bool loaded = false;
-					for (const Structure& structure : pChunkStructues->structures)
-					{
-						if (structure == Structure(StructureType::TREE, minBounds, maxBounds))
-						{
-							loaded = true;
-							break;
-						}
-					}
-
-					if (loaded)
-						continue;
-				}
-
-				Structure& structure = pChunkStructues->structures.emplace_back();
-				structure.type = StructureType::TREE;
-				structure.worldBoundsMin = blockCoord - halfXZMaxBounds;
-				structure.worldBoundsMax = (blockCoord + treeDesc.boundsMax) - halfXZMaxBounds;
-			}
-		}
-
-		if (pChunkStructues)
-			pChunkStructues->structures.shrink_to_fit();
-	}
-
-	BlockType World::searchChunkForStructure(ChunkID chunkID, const glm::ivec3& blockCoord) const
-	{
-		std::shared_lock lock(mutis);
-
-		auto chunkIt = m_chunksStructures.find(chunkID);
-		if (chunkIt == m_chunksStructures.end())
-			return BlockType::INVALID;
-
-		const ChunkStructures& chunkStructures = chunkIt->second;
-
-		lock.unlock();
-
-		for (const Structure& structure : chunkStructures.structures)
-		{
-			if (!structure.isWithinBounds(blockCoord))
-				continue;
-
-			glm::ivec3 localBlockCoord = blockCoord - structure.worldBoundsMin;
-			for (const BlockDescription& blockDesc : s_structureDescriptions[structure.type].blocks)
-			{
-				if (blockDesc.position == localBlockCoord)
-					return blockDesc.type;
-			}
-		}
-
-		return BlockType::INVALID;
-	}
-
-	BlockType World::tryFindStructureBlock(const glm::ivec3& blockCoord) const
-	{
-		ChunkID chunkID = blockCoordToChunkID(blockCoord);
-		BlockType block = searchChunkForStructure(chunkID, blockCoord);
-		return block;
-	}
-
-	uint32_t World::findColoumnHeight(const glm::ivec3& blockCoordXZ) const
-	{
-		float noise = Noise::samplePerlin2D_minusOneOne((float)blockCoordXZ.x, (float)blockCoordXZ.z, m_worldGenData.terrainNoiseData);
-		noise = m_worldGenData.terrrainNoiseInterpolation.sample(noise);
-
-		float scaledNoise = noise * m_worldGenData.amplitude + m_worldGenData.oceanHeight;
-		uint32_t columnHeight = (uint32_t)glm::clamp((int)scaledNoise, 1, (int)WORLD_HEIGHT);
-
-		return columnHeight;
-	}
-
-	BlockType World::generateBlock(const glm::ivec3& blockCoord) const
-	{
-		int columnHeight = (int)findColoumnHeight(blockCoord);
-		int grassDepth = 4;
-		int stoneHeight = glm::max((int)columnHeight - (int)grassDepth, 0);
-
-		if (blockCoord.y < stoneHeight)
-			return BlockType::STONE;
-
-		if (blockCoord.y >= stoneHeight && blockCoord.y < columnHeight)
-		{
-			bool belowGround = blockCoord.y < columnHeight - 1;
-			BlockType structBlockAbove = tryFindStructureBlock(blockCoord + glm::ivec3(0, 1, 0));
-			return isBlockTypeSolid(structBlockAbove) || belowGround ? BlockType::DIRT : BlockType::GRASS;
-		}
-
-		if (blockCoord.y >= columnHeight && blockCoord.y < (int)m_worldGenData.oceanHeight)
-			return BlockType::WATER;
-
-		BlockType structureBlock = tryFindStructureBlock(blockCoord);
-		if (structureBlock != BlockType::INVALID)
-			return structureBlock;
-
-		return BlockType::AIR;
-	}
-
-	void World::applySeed() const
-	{
-		Noise::applyPerlinSeed(m_worldGenData.seed);
-	}
-
 	void World::resetWorld()
 	{
-		std::unique_lock lock(mutis);
-
+		std::unique_lock lock(m_chunkMutex);
 		m_loadedChunks.clear();
-		m_chunksStructures.clear();
 	}
 
 	void World::recreateClouds()
 	{
-		m_cloudGenData.cloudList.clear();
-		m_cloudGenData.localDrift = glm::vec3(FLT_MAX);
-		m_cloudGenData.updateTimer = CloudGenerationData::UPDATE_INTERVAL;
+		CloudGenerationData& cloudGenData = CloudGenerationData::get();
+
+		m_cloudList.clear();
+		cloudGenData.localDrift = glm::vec3(FLT_MAX);
+		cloudGenData.updateTimer = CloudGenerationData::UPDATE_INTERVAL;
 	}
 
 	void World::updateClouds(const Camera& camera, TimeStep dt)
 	{
-		m_cloudGenData.globalDrift += m_cloudGenData.velocity * dt;
-		m_cloudGenData.localDrift += m_cloudGenData.velocity * dt;
+		CloudGenerationData& cloudGenData = CloudGenerationData::get();
 
-		m_cloudGenData.updateTimer += dt;
-		if (m_cloudGenData.updateTimer < CloudGenerationData::UPDATE_INTERVAL)
+		cloudGenData.globalDrift += cloudGenData.velocity * dt;
+		cloudGenData.localDrift += cloudGenData.velocity * dt;
+
+		cloudGenData.updateTimer += dt;
+		if (cloudGenData.updateTimer < CloudGenerationData::UPDATE_INTERVAL)
 			return;
 
-		m_cloudGenData.updateTimer -= CloudGenerationData::UPDATE_INTERVAL;
+		cloudGenData.updateTimer -= CloudGenerationData::UPDATE_INTERVAL;
 
 		clearDistanceClouds(camera);
 		generateCloudList(camera);
 
-		m_cloudGenData.localDrift = glm::vec2(camera.transform.position.x, camera.transform.position.z);
+		cloudGenData.localDrift = glm::vec2(camera.transform.position.x, camera.transform.position.z);
 	}
 
 	void World::generateCloudList(const Camera& camera)
 	{
-		float viewDistance = (float)m_cloudGenData.chunkVisiblityDistance * CHUNK_WIDTH;
+		CloudGenerationData& cloudGenData = CloudGenerationData::get();
+
+		float viewDistance = (float)cloudGenData.chunkVisiblityDistance * CHUNK_WIDTH;
 		glm::vec2 cameraXZPos = glm::vec2(camera.transform.position.x, camera.transform.position.z);
 
-		glm::vec2 min = glm::min(m_cloudGenData.localDrift, cameraXZPos);
-		glm::vec2 max = glm::max(m_cloudGenData.localDrift, cameraXZPos);
+		glm::vec2 min = glm::min(cloudGenData.localDrift, cameraXZPos);
+		glm::vec2 max = glm::max(cloudGenData.localDrift, cameraXZPos);
 
 		glm::vec2 overlappingMin = max - glm::vec2(viewDistance);
 		glm::vec2 overlappingMax = min + glm::vec2(viewDistance);
 
-		for (float x = -viewDistance + cameraXZPos.x; x <= viewDistance + cameraXZPos.x; x += m_cloudGenData.sampleDistance)
+		for (float x = -viewDistance + cameraXZPos.x; x <= viewDistance + cameraXZPos.x; x += cloudGenData.sampleDistance)
 		{
-			for (float z = -viewDistance + cameraXZPos.y; z <= viewDistance + cameraXZPos.y; z += m_cloudGenData.sampleDistance)
+			for (float z = -viewDistance + cameraXZPos.y; z <= viewDistance + cameraXZPos.y; z += cloudGenData.sampleDistance)
 			{
 				if (x >= overlappingMin.x && x <= overlappingMax.x && z >= overlappingMin.y && z <= overlappingMax.y)
 					continue;
 
-				sampleCloud(x - m_cloudGenData.globalDrift.x, z - m_cloudGenData.globalDrift.y);
+				sampleCloud(x - cloudGenData.globalDrift.x, z - cloudGenData.globalDrift.y);
 			}
 		}
 	}
 
 	void World::clearDistanceClouds(const Camera& camera)
 	{
-		float viewDistance = (float)m_cloudGenData.chunkVisiblityDistance * CHUNK_WIDTH;
-		glm::vec3 globalDriftVec3 = glm::vec3(m_cloudGenData.globalDrift.x, 0, m_cloudGenData.globalDrift.y);
+		CloudGenerationData& cloudGenData = CloudGenerationData::get();
 
-		for (int32_t i = (int32_t)m_cloudGenData.cloudList.size() - 1; i >= 0; i--)
+		float viewDistance = (float)cloudGenData.chunkVisiblityDistance * CHUNK_WIDTH;
+		glm::vec3 globalDriftVec3 = glm::vec3(cloudGenData.globalDrift.x, 0, cloudGenData.globalDrift.y);
+
+		for (int32_t i = (int32_t)m_cloudList.size() - 1; i >= 0; i--)
 		{
-			glm::vec3 cloudGlobalPos = m_cloudGenData.cloudList[i] + globalDriftVec3;
+			glm::vec3 cloudGlobalPos = m_cloudList[i] + globalDriftVec3;
 			glm::vec3 camToCloud = glm::abs(cloudGlobalPos - camera.transform.position);
 
 			if (camToCloud.x > viewDistance || camToCloud.z > viewDistance)
 			{
-				m_cloudGenData.cloudList.erase(m_cloudGenData.cloudList.begin() + i);
+				m_cloudList.erase(m_cloudList.begin() + i);
 			}
 		}
 	}
 
 	void World::sampleCloud(float x, float z)
 	{
-		float cloudNoise = Noise::samplePerlin2D_zeroOne(x, z, m_cloudGenData.cloudNoise);
-		float maskNoise = Noise::samplePerlin2D_zeroOne(x, z, m_cloudGenData.maskNoise);
+		CloudGenerationData& cloudGenData = CloudGenerationData::get();
+
+		float cloudNoise = Noise::samplePerlin2D_zeroOne(x, z, cloudGenData.cloudNoise);
+		float maskNoise = Noise::samplePerlin2D_zeroOne(x, z, cloudGenData.maskNoise);
 		float finalNoise = cloudNoise * maskNoise;
 
-		float cloudHeight = finalNoise * m_cloudGenData.height;
+		float cloudHeight = finalNoise * cloudGenData.height;
 
 		float currentHeight = 0.f;
 		while (currentHeight < cloudHeight)
@@ -334,17 +155,17 @@ namespace Okay
 				(Random::randomFloat(seed) * 2.f - 1.f) * 0.5f,
 				Random::randomFloat(seed) * 2.f - 1.f);
 
-			placementOffset = glm::normalize(placementOffset) * m_cloudGenData.maxOffset * Random::randomFloat(seed);
-			glm::vec3 cloudPoint = glm::vec3(x, m_cloudGenData.spawnHeight + currentHeight, z);
+			placementOffset = glm::normalize(placementOffset) * cloudGenData.maxOffset * Random::randomFloat(seed);
+			glm::vec3 cloudPoint = glm::vec3(x, cloudGenData.spawnHeight + currentHeight, z);
 
-			m_cloudGenData.cloudList.emplace_back(cloudPoint + placementOffset);
-			currentHeight += m_cloudGenData.sampleDistance;
+			m_cloudList.emplace_back(cloudPoint + placementOffset);
+			currentHeight += cloudGenData.sampleDistance;
 		}
 	}
 
 	const std::vector<glm::vec3>& World::getCloudList() const
 	{
-		return m_cloudGenData.cloudList;
+		return m_cloudList;
 	}
 
 	Chunk& World::getChunk(ChunkID chunkID)
@@ -372,178 +193,34 @@ namespace Okay
 
 	void World::clearUpdatedChunks()
 	{
-		m_addedChunks.clear();
 		m_removedChunks.clear();
 	}
 
-	void World::unloadDistantChunks()
+	void World::unloadDistantChunks(const Camera& camera)
 	{
-		std::unique_lock lock(mutis, std::defer_lock_t());
+		std::unique_lock lock(m_chunkMutex, std::defer_lock_t());
 
+		glm::ivec2 camChunkCoord = vec3CoordToChunkCoord(camera.transform.position);
 		auto chunkIterator = m_loadedChunks.begin();
 		while (chunkIterator != m_loadedChunks.end())
 		{
 			ChunkID chunkID = chunkIterator->first;
-			if (isChunkWithinRenderDistance(chunkID))
+			if (isChunkWithinRenderDistance(chunkID, camChunkCoord))
 			{
 				++chunkIterator;
 				continue;
 			}
-
+		
 			if (!lock.owns_lock())
 				lock.lock();
-
+		
 			chunkIterator = m_loadedChunks.erase(chunkIterator);
-			m_chunksStructures.erase(chunkID);
 			m_removedChunks.emplace_back(chunkID);
 		}
-	}
-
-	void World::processLoadingChunks()
-	{
-		std::unique_lock lock(mutis, std::defer_lock_t());
-
-		auto chunkIterator = m_loadingChunks.begin();
-		while (chunkIterator != m_loadingChunks.end())
-		{
-			ChunkGeneration& chunkGeneration = chunkIterator->second;
-			if (!chunkGeneration.threadFinished.load())
-			{
-				++chunkIterator;
-				continue;
-			}
-
-			ChunkID chunkID = chunkIterator->first;
-			if (!isChunkWithinRenderDistance(chunkID))
-			{
-				chunkIterator = m_loadingChunks.erase(chunkIterator);
-				continue;
-			}
-
-			if (!lock.owns_lock())
-				lock.lock();
-
-			m_loadedChunks[chunkID] = chunkGeneration.chunk;
-			m_addedChunks.emplace_back(chunkID);
-
-			chunkIterator = m_loadingChunks.erase(chunkIterator);
-		}
-	}
-
-	void World::tryLoadRenderEligableChunks(const Camera& camera)
-	{
-		for (int i = 0; i < (int)m_renderDistance; i++)
-		{
-			uint32_t loadedChunks = 0;
-			uint32_t totalChunks = 0;
-
-			for (int chunkX = -i; chunkX <= i; chunkX++)
-			{
-				int zIncrement = chunkX == -i || chunkX == i ? 1 : i * 2;
-
-				for (int chunkZ = -i; chunkZ <= i; chunkZ += zIncrement)
-				{
-					glm::ivec2 chunkCoord = m_currentCamChunkCoord + glm::ivec2(chunkX, chunkZ);
-					ChunkID chunkID = chunkCoordToChunkID(chunkCoord);
-
-					if (!isChunkWithinRenderDistance(chunkID) || !isChunkInView(camera, chunkID))
-						continue;
-
-					totalChunks++;
-
-					if (isChunkLoaded(chunkID))
-					{
-						loadedChunks++;
-						continue;
-					}
-
-					if (isChunkLoading(chunkID))
-						continue;
-
-					launchChunkGenerationThread(chunkID);
-				}
-			}
-
-			if (loadedChunks != totalChunks)
-				break;
-		}
-	}
-
-	bool World::isChunkWithinRenderDistance(ChunkID chunkID) const
-	{
-		glm::vec2 chunkMiddle = glm::vec2(chunkIDToChunkCoord(chunkID));
-		glm::vec2 camChunkMiddle = glm::vec2(m_currentCamChunkCoord);
-		return glm::length2(chunkMiddle - camChunkMiddle) <= m_renderDistance * m_renderDistance;
-	}
-
-	bool World::isChunkLoading(ChunkID chunkID) const
-	{
-		return m_loadingChunks.contains(chunkID);
-	}
-
-	bool World::isChunkInView(const Camera& camera, ChunkID chunkID) const
-	{
-		glm::vec3 chunkExtents = glm::vec3(CHUNK_WIDTH, WORLD_HEIGHT, CHUNK_WIDTH) * 0.5f;
-		glm::vec3 chunkCenter = chunkCoordToWorldCoord(chunkIDToChunkCoord(chunkID));
-		chunkCenter += chunkExtents;
-
-		Collision::AABB chunkBox = Collision::createAABB(chunkCenter, chunkExtents);
-		return Collision::frustumAABB(camera.frustum, chunkBox);
-	}
-
-	const std::vector<ChunkID>& World::getAddedChunks() const
-	{
-		return m_addedChunks;
 	}
 
 	const std::vector<ChunkID>& World::getRemovedChunks() const
 	{
 		return m_removedChunks;
-	}
-
-	void World::generateChunk(ChunkGeneration* pChunkGeneration)
-	{
-		/*
-			try moving stuctrure generation into here
-			so this thread generates the structures of this and the adjacent chunks and caches the result to send into generateBlock
-			buuuut actually not sure if this works cuz Renderer also calls World::generateBlock()...
-			need better solution...
-		*/
-
-		ChunkID chunkID = pChunkGeneration->chunkID;
-		Chunk& chunk = pChunkGeneration->chunk;
-
-		const int loadWidth = 1;
-		glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkID);
-
-		for (int offsetX = -loadWidth; offsetX <= loadWidth; offsetX++)
-		{
-			for (int offsetZ = -loadWidth; offsetZ <= loadWidth; offsetZ++)
-			{
-				ChunkID adjacentChunkID = chunkCoordToChunkID(chunkCoord + glm::ivec2(offsetX, offsetZ));
-				cacheChunkStructures(chunkID, adjacentChunkID);
-			}
-		}
-
-		for (uint32_t i = 0; i < MAX_BLOCKS_IN_CHUNK; i++)
-		{
-			glm::ivec3 chunkBlockCoord = chunkBlockIdxToChunkBlockCoord(i);
-			glm::ivec3 blockCoord = chunkBlockCoordToBlockCoord(chunkID, chunkBlockCoord);
-			chunk.blocks[i] = generateBlock(blockCoord);
-		}
-	}
-
-	void World::launchChunkGenerationThread(ChunkID chunkID)
-	{
-		ChunkGeneration& chunkGeneration = m_loadingChunks[chunkID];
-		chunkGeneration.chunkID = chunkID;
-		chunkGeneration.threadFinished.store(false);
-
-		ChunkGeneration* pChunkGeneration = &chunkGeneration;
-		m_threadPool.queueJob([=]()
-			{
-				generateChunk(pChunkGeneration);
-				pChunkGeneration->threadFinished.store(true);
-			});
 	}
 }

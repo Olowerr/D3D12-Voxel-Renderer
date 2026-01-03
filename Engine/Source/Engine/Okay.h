@@ -36,6 +36,58 @@ namespace Okay
 	constexpr glm::ivec3 UP_DIR = glm::ivec3(0, 1, 0);
 	constexpr glm::ivec3 FORWARD_DIR = glm::ivec3(0, 0, 1);
 
+	struct Vertex
+	{
+		Vertex() = default;
+
+		// Blocks
+		Vertex(const glm::ivec3& position, const glm::vec2& globalUV, uint32_t textureID, uint32_t sideIdx)
+		{
+			data = 0;
+			writeBits(position.x, 0, 5);
+			writeBits(position.y, 5, 9);
+			writeBits(position.z, 14, 5);
+
+			writeBits((uint32_t)globalUV.x, 19, 1);
+			writeBits((uint32_t)globalUV.y, 20, 1);
+			writeBits(textureID, 21, 8);
+			writeBits(sideIdx, 29, 3);
+		}
+
+		// Water
+		Vertex(const glm::ivec3& position, const glm::vec2& globalUV, uint32_t textureID)
+		{
+			data = 0;
+			writeBits(position.x, 0, 5);
+			writeBits(position.y, 5, 9);
+			writeBits(position.z, 14, 5);
+
+			writeBits((uint32_t)globalUV.x, 19, 1);
+			writeBits((uint32_t)globalUV.y, 20, 1);
+
+			// Kinda unneccessary to store this, option is to store it in cbuffer, but feels meh
+			writeBits(textureID, 21, 8);
+		}
+
+		void writeBits(uint32_t value, uint32_t bitPos, uint32_t numBits)
+		{
+			data |= value << (32 - (bitPos + numBits));
+		}
+
+		bool operator==(Vertex other) const
+		{
+			return data == other.data;
+		}
+
+		uint32_t data = INVALID_UINT32;
+	};
+
+	struct MeshData
+	{
+		std::vector<Vertex> vertices;
+		std::vector<uint32_t> indices;
+	};
+
 	inline bool readBinary(const FilePath& binPath, std::string& output)
 	{
 		std::ifstream reader(binPath.c_str(), std::ios::binary);

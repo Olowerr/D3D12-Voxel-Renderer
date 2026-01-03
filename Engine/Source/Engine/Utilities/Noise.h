@@ -16,7 +16,7 @@ namespace Okay
 			float cutOff = 0.f;
 		};
 
-		void applyPerlinSeed(uint32_t seed);
+		void applyPerlinSeed(uint64_t seed);
 		float samplePerlin2D_minusOneOne(float x, float y, const SamplingData& samplingData);
 		float samplePerlin2D_zeroOne(float x, float y, const SamplingData& samplingData);
 	}

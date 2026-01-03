@@ -34,12 +34,6 @@ namespace Okay
 		glm::ivec3 worldBoundsMax = glm::ivec3(0);
 	};
 
-	struct ChunkStructures
-	{
-		ChunkStructures() = default;
-		std::vector<Structure> structures;
-	};
-
 	struct BlockDescription
 	{
 		BlockDescription() = default;

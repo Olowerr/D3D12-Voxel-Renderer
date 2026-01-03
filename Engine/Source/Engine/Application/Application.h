@@ -5,6 +5,7 @@
 #include "Engine/D3D12/Renderer.h"
 #include "Time.h"
 #include "Engine/World/World.h"
+#include "Engine/World/ChunkGenerator.h"
 
 namespace Okay
 {
@@ -19,11 +20,18 @@ namespace Okay
 	protected:
 		virtual void onUpdate(TimeStep dt) = 0;
 
+	private:
+		TextureNameIDs initializeTextures();
+
 	protected:
 		Window m_window;
 		Camera m_camera;
 		World m_world;
 		Renderer m_renderer;
+		ChunkGenerator m_chunkGenerator;
+
+	private:
+		BlockTextureIDs m_blockTextureIds;
 
 	};
 }

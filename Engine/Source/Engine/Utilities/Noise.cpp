@@ -22,7 +22,7 @@ namespace Okay
 			return noise;
 		}
 
-		void applyPerlinSeed(uint32_t seed)
+		void applyPerlinSeed(uint64_t seed)
 		{
 			db::reseed(seed);
 		}
@@ -31,7 +31,6 @@ namespace Okay
 		{
 			float noise = samplePerlin_Internal(x, y, samplingData);
 			noise = noise * 2.f - 1.f;
-
 			return noise;
 		}
 

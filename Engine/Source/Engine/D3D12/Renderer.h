@@ -15,6 +15,7 @@ namespace Okay
 	class World;
 	struct Chunk;
 	struct Camera;
+	class ChunkGenerator;
 
 	struct FrameResources
 	{
@@ -69,85 +70,6 @@ namespace Okay
 		IUnknown* pDxUnknown = nullptr; // Base class containing Release()
 	};
 
-	struct Vertex
-	{
-		Vertex() = default;
-
-		// Blocks
-		Vertex(const glm::ivec3& position, const glm::vec2& globalUV, uint32_t textureID, uint32_t sideIdx)
-		{
-			data = 0;
-			writeBits(position.x, 0, 5);
-			writeBits(position.y, 5, 9);
-			writeBits(position.z, 14, 5);
-
-			writeBits((uint32_t)globalUV.x, 19, 1);
-			writeBits((uint32_t)globalUV.y, 20, 1);
-			writeBits(textureID, 21, 8);
-			writeBits(sideIdx, 29, 3);
-		}
-
-		// Water
-		Vertex(const glm::ivec3& position, const glm::vec2& globalUV, uint32_t textureID)
-		{
-			data = 0;
-			writeBits(position.x, 0, 5);
-			writeBits(position.y, 5, 9);
-			writeBits(position.z, 14, 5);
-
-			writeBits((uint32_t)globalUV.x, 19, 1);
-			writeBits((uint32_t)globalUV.y, 20, 1);
-
-			// Kinda unneccessary to store this, option is to store it in GPURenderData, but feels meh
-			writeBits(textureID, 21, 8);
-		}
-
-		void writeBits(uint32_t value, uint32_t bitPos, uint32_t numBits)
-		{
-			data |= value << (32 - (bitPos + numBits));
-		}
-
-		bool operator==(Vertex other) const
-		{
-			return data == other.data;
-		}
-
-		uint32_t data = INVALID_UINT32;
-	};
-
-	struct MeshData
-	{
-		std::vector<Vertex> vertices;
-		std::vector<uint32_t> indices;
-	};
-
-	struct ChunkMeshData
-	{
-		MeshData blockMesh;
-		MeshData waterMesh;
-	};
-
-	struct ThreadSafeChunkMesh
-	{
-		std::atomic<bool> meshGenerated;
-		std::atomic<uint32_t> latestChunkGenID;
-		// Might be neccessay to add a 'finishedID' int here to confirm that lastID == finishedID
-		// incase threadFinished is set to true right before lastID is incremented & threadFinished set to false.
-		// But Seems oki for now :3
-
-		ChunkMeshData meshData;
-	};
-
-	struct SideTextureIDs
-	{
-		SideTextureIDs()
-		{
-			for (uint8_t& id : sideIDs)
-				id = INVALID_UINT8;
-		}
-		uint8_t sideIDs[3] = {};
-	};
-
 	class Renderer
 	{
 	public:
@@ -157,16 +79,16 @@ namespace Okay
 		Renderer() = default;
 		~Renderer() = default;
 
-		void initialize(Window& window);
+		void initialize(Window& window, const BlockTextureIDs& blockTextureIDs, const TextureNameIDs& textureIDs);
 		void shutdown();
 
 		void onResize(uint32_t width, uint32_t height);
 		void unloadChunks();
 
-		void render(const World& world, const Camera& camera);
+		void render(const World& world, const Camera& camera, const ChunkGenerator& chunkGenerator);
 
 	private:
-		void updateBuffers(const World& world, const Camera& camera);
+		void updateBuffers(const World& world, const Camera& camera, const ChunkGenerator& chunkGenerator);
 		void preRender();
 		void renderWorld(const World& world);
 		void postRender();
@@ -187,16 +109,10 @@ namespace Okay
 		void transitionResource(ID3D12GraphicsCommandList* pCommandList, ID3D12Resource* pResource, D3D12_RESOURCE_STATES beforeState, D3D12_RESOURCE_STATES newState, uint32_t subResource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
 		void updateDefaultHeapResource(ID3D12Resource* pTarget, uint64_t targetOffset, const void* pData, uint64_t dataSize);
 
-		void updateChunks(const World& world);
-		void processAddedChunks(const World& world);
-		void processLoadingChunkMeshes(const World& world);
+		void updateChunks(const World& world, const ChunkGenerator& chunkGenerator);
 
 		void writeMeshData(GPUMeshInfo& gpuMeshInfo, const MeshData& meshData);
 		void findAndDeleteDXChunk(ChunkID chunkID);
-
-		void generateChunkMesh(const World* pWorld, ChunkID chunkID, Chunk* pChunkData, uint32_t chunkGenID, ChunkMeshData& outMeshData);
-		void addBlockMeshData(const World* pWorld, BlockType block, ChunkID chunkId, Chunk* pChunkData, const glm::ivec3& worldBlockCoord, MeshData& outMeshData);
-		void addWaterMeshData(Chunk* pChunkData, const glm::ivec3& worldBlockCoord, MeshData& outMeshData);
 
 		D3D12_CPU_DESCRIPTOR_HANDLE createRTVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc);
 		D3D12_CPU_DESCRIPTOR_HANDLE createDSVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_DEPTH_STENCIL_VIEW_DESC* pDesc);
@@ -219,12 +135,11 @@ namespace Okay
 		void shutdowFrameResources(FrameResources& frame);
 		void updateBackBufferTextures();
 
-
 		ID3D12RootSignature* createRootSignature(const D3D12_ROOT_SIGNATURE_DESC* pDesc, std::wstring_view name);
 		ID3D12DescriptorHeap* createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors, bool shaderVisible, std::wstring_view name);
 		ID3D12Resource* createCommittedBuffer(uint64_t size, D3D12_RESOURCE_STATES initialState, D3D12_HEAP_TYPE heapType, std::wstring_view name);
 
-		ID3D12Resource* createTextureSheet(FrameResources& frame);
+		ID3D12Resource* createTextureSheet(FrameResources& frame, const BlockTextureIDs& blockTextureIDs, const TextureNameIDs& textureIDs);
 		void uploadTextureSheetData(ID3D12Resource* pTarget, FrameResources& frame, const std::unordered_map<std::string, uint32_t>& textureIds);
 		void generateTextureSheetMipMaps(ID3D12Resource* pTextureSheet, uint32_t tileSize);
 		uint32_t getTextureID(BlockType blockType, BlockSide blockSide);
@@ -260,7 +175,6 @@ namespace Okay
 		D3D12_GPU_VIRTUAL_ADDRESS m_renderDataGVA = INVALID_UINT64;
 
 		std::vector<DXChunk> m_dxChunks;
-		std::unordered_map<ChunkID, ThreadSafeChunkMesh> m_loadingChunkMesh;
 
 		ResourceArena m_gpuVertexData;
 		ResourceArena m_gpuIndicesData;

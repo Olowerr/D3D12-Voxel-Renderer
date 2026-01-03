@@ -1,4 +1,5 @@
 #include "App.h"
+#include "Engine/World/WorldGenSettings.h"
 
 #include "glm/common.hpp"
 #include "imgui/imgui.h"
@@ -11,6 +12,43 @@ using namespace Okay;
 App::App()
 	:Application("D3D12 Voxel Renderer", 1600, 900)
 {
+	WorldGenerationData& worldGenData = WorldGenerationData::get();
+	worldGenData.terrrainNoiseInterpolation.addPoint(-0.45f, -0.55f);
+	worldGenData.terrrainNoiseInterpolation.addPoint(-0.1f, 0.f);
+	worldGenData.terrrainNoiseInterpolation.addPoint(0.f, 0.1f);
+	worldGenData.terrrainNoiseInterpolation.addPoint(0.275f, 0.15f);
+	worldGenData.terrrainNoiseInterpolation.addPoint(0.65f, 0.525f);
+
+	worldGenData.terrainNoiseData.numOctaves = 4;
+	worldGenData.terrainNoiseData.frequencyNumerator = 1.f;
+	worldGenData.terrainNoiseData.frequencyDenominator = 150.f;
+
+	worldGenData.treeNoiseData.numOctaves = 2;
+	worldGenData.treeNoiseData.frequencyNumerator = 0.835f;
+	worldGenData.treeNoiseData.frequencyDenominator = 1.f;
+	worldGenData.treeNoiseData.exponent = 3.39f;
+
+	worldGenData.treeAreaNoiseData.frequencyDenominator = 100.f;
+	worldGenData.treeAreaNoiseThreshold = 0.46f;
+	worldGenData.treeMaxSpawnAltitude = 83;
+
+
+	CloudGenerationData& cloudGenData = CloudGenerationData::get();
+	cloudGenData.cloudNoise.numOctaves = 1;
+	cloudGenData.cloudNoise.frequencyNumerator = 1.f;
+	cloudGenData.cloudNoise.frequencyDenominator = 67.f;
+	cloudGenData.cloudNoise.persistence = 0.5f;
+	cloudGenData.cloudNoise.cutOff = 0.f;
+	cloudGenData.cloudNoise.exponent = 1.35f;
+
+	cloudGenData.maskNoise.numOctaves = 5;
+	cloudGenData.maskNoise.frequencyNumerator = 1.f;
+	cloudGenData.maskNoise.frequencyDenominator = 147.f;
+	cloudGenData.maskNoise.persistence = 0.48f;
+	cloudGenData.maskNoise.cutOff = 0.64f;
+	cloudGenData.maskNoise.exponent = 1.f;
+
+	m_chunkGenerator.applySeed(worldGenData.seed);
 }
 
 void App::onUpdate(TimeStep dt)
@@ -150,33 +188,36 @@ void App::handleImgui(TimeStep dt)
 
 		ImGui::Separator();
 		
-		ImGui::DragInt("Render Distance", (int*)&m_world.m_renderDistance, 0.075f, 0, INT_MAX);
+		WorldGenerationData& worldGenData = WorldGenerationData::get();
+		ImGui::DragInt("Render Distance", (int*)&worldGenData.renderDistance, 0.075f, 0, UINT32_MAX);
+		ImGui::Checkbox("Pause Gen", &worldGenData.pauseGen);
 	}
 	ImGui::End();
 
 	if (ImGui::Begin("Clouds"))
 	{
-		ImGui::PushItemWidth(150.f);
-
+		CloudGenerationData& cloudGenData = CloudGenerationData::get();
 		bool update = false;
 
-		ImGui::DragFloat2("Velocity", glm::value_ptr(m_world.m_cloudGenData.velocity), 0.1f);
+		ImGui::PushItemWidth(150.f);
 
-		ImGui::DragInt("spawnHeight", (int*)&m_world.m_cloudGenData.spawnHeight, 0.1f);
-		ImGui::DragFloat("Scale", &m_world.m_cloudGenData.scale, 0.01f);
-		update |= ImGui::DragFloat("Height", &m_world.m_cloudGenData.height, 0.01f);
-		update |= ImGui::DragFloat("Max Offset", &m_world.m_cloudGenData.maxOffset, 0.01f);
-		update |= ImGui::DragFloat("Sample Distance", &m_world.m_cloudGenData.sampleDistance, 0.01f, 1.f, FLT_MAX, "%.3f", ImGuiSliderFlags_AlwaysClamp);
-		update |= ImGui::DragInt("Visibilty Distance (chunks)", (int*)&m_world.m_cloudGenData.chunkVisiblityDistance, 0.1f);
-		ImGui::ColorEdit4("Colour", glm::value_ptr(m_world.m_cloudGenData.colour));
+		ImGui::DragFloat2("Velocity", glm::value_ptr(cloudGenData.velocity), 0.1f);
+
+		ImGui::DragInt("spawnHeight", (int*)&cloudGenData.spawnHeight, 0.1f);
+		ImGui::DragFloat("Scale", &cloudGenData.scale, 0.01f);
+		update |= ImGui::DragFloat("Height", &cloudGenData.height, 0.01f);
+		update |= ImGui::DragFloat("Max Offset", &cloudGenData.maxOffset, 0.01f);
+		update |= ImGui::DragFloat("Sample Distance", &cloudGenData.sampleDistance, 0.01f, 1.f, FLT_MAX, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+		update |= ImGui::DragInt("Visibilty Distance (chunks)", (int*)&cloudGenData.chunkVisiblityDistance, 0.1f);
+		ImGui::ColorEdit4("Colour", glm::value_ptr(cloudGenData.colour));
 
 		ImGui::Separator();
 		
 		ImGui::Text("Placement");
-		update |= imguiNoiseSamplingControls(m_world.m_cloudGenData.cloudNoise, "CloudNoise");
+		update |= imguiNoiseSamplingControls(cloudGenData.cloudNoise, "CloudNoise");
 
 		ImGui::Text("Mask");
-		update |= imguiNoiseSamplingControls(m_world.m_cloudGenData.maskNoise, "CloudMask");
+		update |= imguiNoiseSamplingControls(cloudGenData.maskNoise, "CloudMask");
 
 		if (update)
 			m_world.recreateClouds();
@@ -194,10 +235,10 @@ void App::handleImgui(TimeStep dt)
 			m_renderer.unloadChunks();
 		}
 
-		WorldGenerationData& worldGenData = m_world.m_worldGenData;
+		WorldGenerationData& worldGenData = WorldGenerationData::get();
 
 		if (ImGui::DragInt("Seed", (int*)&worldGenData.seed, 0.2f))
-			m_world.applySeed();
+			m_chunkGenerator.applySeed(worldGenData.seed);
 
 		ImGui::Separator();
 

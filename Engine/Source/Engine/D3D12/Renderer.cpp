@@ -3,6 +3,8 @@
 #include "Engine/World/World.h"
 #include "Engine/Application/ImguiHelper.h"
 #include "Engine/World/Camera.h"
+#include "Engine/World/ChunkGenerator.h"
+#include "Engine/World/WorldGenSettings.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
@@ -33,9 +35,7 @@ namespace Okay
 		glm::vec3 chunkWorldPos = glm::vec3(0.f);
 	};
 
-	static std::shared_mutex s_loadingChunksMutis;
-
-	void Renderer::initialize(Window& window)
+	void Renderer::initialize(Window& window, const BlockTextureIDs& blockTextureIDs, const TextureNameIDs& textureIDs)
 	{
 #if 0
 		enableDebugLayer();
@@ -75,16 +75,13 @@ namespace Okay
 		initializeFrameResources(initFrame, 100'000);
 		reset(initFrame.pCommandAllocator, initFrame.pCommandList);
 
-		m_pTextureSheet = createTextureSheet(initFrame);
+		m_pTextureSheet = createTextureSheet(initFrame, blockTextureIDs, textureIDs);
 		m_textureHandle = createSRVDescriptor(m_pTextureDescHeap, 0, m_pTextureSheet, nullptr);
 
 		flush(initFrame.pCommandList, initFrame.pCommandAllocator, initFrame.pFence, initFrame.fenceValue);
 		shutdowFrameResources(initFrame);
 
 		generateTextureSheetMipMaps(m_pTextureSheet, TEXTURE_SHEET_TILE_SIZE);
-
-		uint32_t numThreads = glm::max(uint32_t(std::thread::hardware_concurrency() * 0.5), 1u);
-		m_threadPool.initialize(numThreads);
 
 		// In this version of Imgui, only 1 SRV is needed, it's stated that future versions will need more, but I don't see a reason to switch version atm :]
 		m_pImguiDescriptorHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, true, L"Imgui");
@@ -120,7 +117,6 @@ namespace Okay
 
 		m_gpuVertexData.shutdown();
 		m_gpuIndicesData.shutdown();
-		m_threadPool.shutdown();
 
 		D3D12_RELEASE(m_pImguiDescriptorHeap);
 		imguiShutdown();
@@ -158,12 +154,9 @@ namespace Okay
 		m_dxChunks.clear();
 		m_gpuVertexData.clear();
 		m_gpuIndicesData.clear();
-
-		std::unique_lock lock(s_loadingChunksMutis);
-		m_loadingChunkMesh.clear();
 	}
 
-	void Renderer::render(const World& world, const Camera& camera)
+	void Renderer::render(const World& world, const Camera& camera, const ChunkGenerator& chunkGenerator)
 	{
 		FrameResources& frame = getCurrentFrameResorces();
 		wait(frame.pFence, frame.fenceValue);
@@ -174,7 +167,7 @@ namespace Okay
 		frame.ringBuffer.jumpToStart();
 		frame.ringBuffer.map();
 
-		updateBuffers(world, camera);
+		updateBuffers(world, camera, chunkGenerator);
 		preRender();
 		renderWorld(world);
 		postRender();
@@ -182,7 +175,7 @@ namespace Okay
 		frame.ringBuffer.unmap();
 	}
 
-	void Renderer::updateBuffers(const World& world, const Camera& camera)
+	void Renderer::updateBuffers(const World& world, const Camera& camera, const ChunkGenerator& chunkGenerator)
 	{
 		FrameResources& frame = getCurrentFrameResorces();
 
@@ -194,7 +187,7 @@ namespace Okay
 
 		m_renderDataGVA = frame.ringBuffer.allocate(&renderData, sizeof(renderData));
 
-		updateChunks(world);
+		updateChunks(world, chunkGenerator);
 	}
 
 	void Renderer::preRender()
@@ -294,10 +287,11 @@ namespace Okay
 		const std::vector<glm::vec3>& cloudList = world.getCloudList();
 		D3D12_GPU_VIRTUAL_ADDRESS cloudPointsGVA = frame.ringBuffer.allocate(cloudList.data(), cloudList.size() * sizeof(glm::vec3));
 
+		CloudGenerationData& cloudGenData = CloudGenerationData::get();
 		GPUCloudsRenderData cloudRenderData = {};
-		cloudRenderData.colour = world.m_cloudGenData.colour;
-		cloudRenderData.offset = glm::vec3(world.m_cloudGenData.globalDrift.x, 0.f, world.m_cloudGenData.globalDrift.y);
-		cloudRenderData.scale = world.m_cloudGenData.scale;
+		cloudRenderData.colour = cloudGenData.colour;
+		cloudRenderData.offset = glm::vec3(cloudGenData.globalDrift.x, 0.f, cloudGenData.globalDrift.y);
+		cloudRenderData.scale = cloudGenData.scale;
 
 		D3D12_GPU_VIRTUAL_ADDRESS cloudsRenderDataGVA = frame.ringBuffer.allocate(&cloudRenderData, sizeof(GPUCloudsRenderData));
 
@@ -387,323 +381,27 @@ namespace Okay
 		frame.pCommandList->CopyBufferRegion(pTarget, targetOffset, frame.ringBuffer.getDXResource(), uploadBufferOffset, dataSize);
 	}
 
-	static void addVertex(MeshData& meshData, Vertex newVertex)
-	{
-		uint32_t idx = INVALID_UINT32;
-		int startIdx = glm::max((int)meshData.vertices.size() - 5, 0); // Lmao
-		for (uint64_t i = startIdx; i < meshData.vertices.size(); i++)
-		{
-			if (meshData.vertices[i] == newVertex)
-			{
-				idx = (uint32_t)i;
-				break;
-			}
-		}
-
-		if (idx == INVALID_UINT32)
-		{
-			meshData.indices.emplace_back((uint32_t)meshData.vertices.size());
-			meshData.vertices.emplace_back(newVertex);
-		}
-		else
-		{
-			meshData.indices.emplace_back(idx);
-		}
-	}
-
-	static bool checkSolidBlock(const glm::ivec3& blockCoord, ChunkID chunkID, Chunk* pChunkData, const World* pWorld)
-	{
-		if (blockCoord.y < 0 || blockCoord.y >= WORLD_HEIGHT)
-			return false;
-
-		BlockType block = BlockType::INVALID;
-		if (blockCoordToChunkID(blockCoord) == chunkID)
-		{
-			glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(blockCoord);
-			uint32_t chunkBlockIdx = chunkBlockCoordToChunkBlockIdx(chunkBlockCoord);
-			block = pChunkData->blocks[chunkBlockIdx];
-		}
-		else
-		{
-			block = pWorld->tryGetBlockThreaded(blockCoord);
-			if (block == BlockType::INVALID)
-				return true;
-		}
-
-		return World::isBlockTypeSolid(block);
-	}
-
-	void Renderer::generateChunkMesh(const World* pWorld, ChunkID chunkID, Chunk* pChunkData, uint32_t chunkGenID, ChunkMeshData& outMeshData)
-	{
-		glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkID);
-		glm::ivec3 worldCoord = chunkCoordToWorldCoord(chunkCoord);
-
-		outMeshData.blockMesh.vertices.reserve(MAX_BLOCKS_IN_CHUNK * 36ull);
-		outMeshData.blockMesh.indices.reserve(MAX_BLOCKS_IN_CHUNK * 36ull);
-
-		outMeshData.waterMesh.vertices.reserve(MAX_BLOCKS_IN_CHUNK * 36ull / 2);
-		outMeshData.waterMesh.indices.reserve(MAX_BLOCKS_IN_CHUNK * 36ull / 2);
-
-		for (uint32_t i = 0; i < MAX_BLOCKS_IN_CHUNK; i++)
-		{
-			std::shared_lock lock(s_loadingChunksMutis);
-
-			const auto& chunkIterator = m_loadingChunkMesh.find(chunkID);
-			if (chunkIterator == m_loadingChunkMesh.end())
-				return;
-
-			const ThreadSafeChunkMesh& threadChunk = chunkIterator->second;
-			if (threadChunk.latestChunkGenID != chunkGenID)
-				return;
-
-			lock.unlock();
-
-			// way to cancel mesh building if chunk unloads? but it's kinda rare no? mesh building isn't that slow
-			BlockType block = pChunkData->blocks[i];
-			if (block == BlockType::AIR)
-				continue;
-			
-			glm::ivec3 chunkBlockCoord = chunkBlockIdxToChunkBlockCoord(i);
-			glm::ivec3 worldBlockCoord = chunkBlockCoord + worldCoord;
-
-			if (block == BlockType::WATER)
-			{
-				addWaterMeshData(pChunkData, worldBlockCoord, outMeshData.waterMesh);
-			}
-			else
-			{
-				addBlockMeshData(pWorld, block, chunkID, pChunkData, worldBlockCoord, outMeshData.blockMesh);
-			}
-		}
-	}
-
-	void Renderer::addBlockMeshData(const World* pWorld, BlockType block, ChunkID chunkId, Chunk* pChunkData, const glm::ivec3& worldBlockCoord, MeshData& outMeshData)
-	{
-		// Top
-		if (!checkSolidBlock(worldBlockCoord + UP_DIR, chunkId, pChunkData, pWorld))
-		{
-			uint32_t textureId = getTextureID(block, BlockSide::TOP);
-			glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(worldBlockCoord);
-
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 0));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 1), textureId, 0));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId, 0));
-
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId, 0));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId, 0));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 0));
-		}
-
-		// Bottom
-		if (!checkSolidBlock(worldBlockCoord - UP_DIR, chunkId, pChunkData, pWorld))
-		{
-			uint32_t textureId = getTextureID(block, BlockSide::BOTTOM);
-			glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(worldBlockCoord);
-
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 1));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 0), textureId, 1));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), textureId, 1));
-
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 0), textureId, 1));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), textureId, 1));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 1));
-		}
-
-		// Right
-		if (!checkSolidBlock(worldBlockCoord + RIGHT_DIR, chunkId, pChunkData, pWorld))
-		{
-			uint32_t textureId = getTextureID(block, BlockSide::SIDE);
-			glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(worldBlockCoord);
-
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId, 2));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(1, 0), textureId, 2));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 2));
-
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId, 2));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(1, 1), textureId, 2));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(0, 1), textureId, 2));
-		}
-
-		// Left
-		if (!checkSolidBlock(worldBlockCoord - RIGHT_DIR, chunkId, pChunkData, pWorld))
-		{
-			uint32_t textureId = getTextureID(block, BlockSide::SIDE);
-			glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(worldBlockCoord);
-
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), textureId, 3));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(0, 0), textureId, 3));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 3));
-
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(1, 1), textureId, 3));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(0, 1), textureId, 3));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId, 3));
-		}
-
-		// Forward
-		if (!checkSolidBlock(worldBlockCoord + FORWARD_DIR, chunkId, pChunkData, pWorld))
-		{
-			uint32_t textureId = getTextureID(block, BlockSide::SIDE);
-			glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(worldBlockCoord);
-
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), textureId, 4));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 0), textureId, 4));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), textureId, 4));
-
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 1), glm::vec2(1, 1), textureId, 4));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 1), glm::vec2(0, 1), textureId, 4));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 0), textureId, 4));
-		}
-
-		// Backward
-		if (!checkSolidBlock(worldBlockCoord - FORWARD_DIR, chunkId, pChunkData, pWorld))
-		{
-			uint32_t textureId = getTextureID(block, BlockSide::SIDE);
-			glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(worldBlockCoord);
-
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), textureId, 5));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(0, 0), textureId, 5));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), textureId, 5));
-
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(1, 0), textureId, 5));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 0, 0), glm::vec2(1, 1), textureId, 5));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 0, 0), glm::vec2(0, 1), textureId, 5));
-		}
-	}
-
-	void Renderer::addWaterMeshData(Chunk* pChunkData, const glm::ivec3& worldBlockCoord, MeshData& outMeshData)
-	{
-		glm::ivec3 aboveBlockCoord = worldBlockCoord + UP_DIR;
-		if (aboveBlockCoord.y >= WORLD_HEIGHT)
-			return;
-
-		glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(aboveBlockCoord);
-		uint32_t chunkBlockIdx = chunkBlockCoordToChunkBlockIdx(chunkBlockCoord);
-
-		if (pChunkData->blocks[chunkBlockIdx] != BlockType::WATER)
-		{
-			uint32_t textureId = getTextureID(BlockType::WATER, BlockSide::SIDE);
-			glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(worldBlockCoord);
-
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 1), glm::vec2(1, 1), textureId));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId));
-
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 1), glm::vec2(0, 1), textureId));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(1, 1, 0), glm::vec2(0, 0), textureId));
-			addVertex(outMeshData, Vertex(chunkBlockCoord + glm::ivec3(0, 1, 0), glm::vec2(1, 0), textureId));
-		}
-	}
-
-	void Renderer::updateChunks(const World& world)
+	void Renderer::updateChunks(const World& world, const ChunkGenerator& chunkGenerator)
 	{
 		for (ChunkID chunkID : world.getRemovedChunks())
 		{
 			findAndDeleteDXChunk(chunkID);
 		}
 
-		processAddedChunks(world);
-		processLoadingChunkMeshes(world);
-	}
-
-	void Renderer::processAddedChunks(const World& world)
-	{
-		// Not sure if should be static or not, prolly doesn't really matter :3
-		static const glm::ivec2 OFFSETS[] =
-		{
-			glm::ivec2(0,  0),
-			glm::ivec2(-1,  0),
-			glm::ivec2(1,  0),
-			glm::ivec2(0, -1),
-			glm::ivec2(0,  1),
-		};
-
-		std::unique_lock lock(s_loadingChunksMutis, std::defer_lock_t());
-
-		for (ChunkID chunkID : world.getAddedChunks())
-		{
-			glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkID);
-			for (const glm::ivec2& offset : OFFSETS)
-			{
-				ChunkID adjacentChunkID = chunkCoordToChunkID(chunkCoord + offset);
-				if (!world.isChunkLoaded(adjacentChunkID))
-					continue;
-
-				uint32_t chunkGenID = INVALID_UINT32;
-				auto adjacentChunkIt = m_loadingChunkMesh.find(adjacentChunkID);
-
-				if (adjacentChunkIt != m_loadingChunkMesh.end())
-				{
-					ThreadSafeChunkMesh& chunkMesh = adjacentChunkIt->second;
-					chunkGenID = ++chunkMesh.latestChunkGenID;
-					chunkMesh.meshGenerated.store(false);
-				}
-				else
-				{
-					if (!lock.owns_lock())
-						lock.lock();
-
-					ThreadSafeChunkMesh& chunkMesh = m_loadingChunkMesh[adjacentChunkID];
-					chunkMesh.latestChunkGenID = 0;
-					chunkGenID = 0;
-					chunkMesh.meshGenerated.store(false);
-				}
-
-				// Copy so the mesh thread can run independently
-				Chunk* pChunkData = new Chunk(world.getChunkConst(adjacentChunkID));
-
-				const World* pWorld = &world;
-				m_threadPool.queueJob([=]()
-					{
-						ChunkMeshData outMeshData;
-						generateChunkMesh(pWorld, adjacentChunkID, pChunkData, chunkGenID, outMeshData);
-						delete pChunkData;
-
-						std::shared_lock lock(s_loadingChunksMutis);
-						auto chunkIterator = m_loadingChunkMesh.find(adjacentChunkID);
-						if (chunkIterator == m_loadingChunkMesh.end())
-							return;
-
-						ThreadSafeChunkMesh& threadChunk = chunkIterator->second;
-						if (threadChunk.latestChunkGenID == chunkGenID)
-						{
-							threadChunk.meshData = std::move(outMeshData);
-							threadChunk.meshGenerated.store(true);
-						}
-					});
-			}
-		}
-	}
-
-	void Renderer::processLoadingChunkMeshes(const World& world)
-	{
-		std::unique_lock lock(s_loadingChunksMutis, std::defer_lock_t());
-
 		FrameResources& frame = getCurrentFrameResorces();
-		bool meshResourcesTranitioned = false;
+		bool meshResourcesTransitioned = false;
 
-		auto chunkIterator = m_loadingChunkMesh.begin();
-		while (chunkIterator != m_loadingChunkMesh.end())
+		for (ChunkGenID chunkGenID : chunkGenerator.getCompletedChunks())
 		{
-			ThreadSafeChunkMesh& threadChunk = chunkIterator->second;
-			if (!threadChunk.meshGenerated.load())
-			{
-				++chunkIterator;
+			const ChunkGenerationThread& chunkGen = chunkGenerator.getChunkGenData(chunkGenID);
+			ChunkID chunkID = chunkGen.chunkID;
+
+			if (!world.isChunkLoaded(chunkID) || !chunkGen.blockMesh.vertices.size())
 				continue;
-			}
 
-			ChunkID chunkID = chunkIterator->first;
-			if (!world.isChunkLoaded(chunkID))
+			if (!meshResourcesTransitioned)
 			{
-				if (!lock.owns_lock())
-					lock.lock();
-
-				chunkIterator = m_loadingChunkMesh.erase(chunkIterator);
-				continue;
-			}
-
-			if (!meshResourcesTranitioned)
-			{
-				meshResourcesTranitioned = true;
+				meshResourcesTransitioned = true;
 				transitionResource(frame.pCommandList, m_gpuVertexData.getDXResource(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
 				transitionResource(frame.pCommandList, m_gpuIndicesData.getDXResource(), D3D12_RESOURCE_STATE_INDEX_BUFFER, D3D12_RESOURCE_STATE_COPY_DEST);
 			}
@@ -712,16 +410,11 @@ namespace Okay
 
 			DXChunk& dxChunk = m_dxChunks.emplace_back();
 			dxChunk.chunkID = chunkID;
-			writeMeshData(dxChunk.blockGPUMeshInfo, threadChunk.meshData.blockMesh);
-			writeMeshData(dxChunk.waterGPUMeshInfo, threadChunk.meshData.waterMesh);
-
-			if (!lock.owns_lock())
-				lock.lock();
-
-			chunkIterator = m_loadingChunkMesh.erase(chunkIterator);
+			writeMeshData(dxChunk.blockGPUMeshInfo, chunkGen.blockMesh);
+			writeMeshData(dxChunk.waterGPUMeshInfo, chunkGen.waterMesh);
 		}
 
-		if (meshResourcesTranitioned)
+		if (meshResourcesTransitioned)
 		{
 			transitionResource(frame.pCommandList, m_gpuVertexData.getDXResource(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 			transitionResource(frame.pCommandList, m_gpuIndicesData.getDXResource(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDEX_BUFFER);
@@ -1052,39 +745,10 @@ namespace Okay
 		return pResource;
 	}
 
-	ID3D12Resource* Renderer::createTextureSheet(FrameResources& frame)
+	ID3D12Resource* Renderer::createTextureSheet(FrameResources& frame, const BlockTextureIDs& blockTextureIDs, const TextureNameIDs& textureIDs)
 	{
-		std::unordered_map<BlockType, BlockTextures> textureNames;
-		findBlockTextures(textureNames);
-
-		std::unordered_map<std::string, uint32_t> textureNameToId;
-		uint32_t textureID = 0;
-		for (const auto& blockTextures : textureNames)
-		{
-			const BlockTextures& textures = blockTextures.second;
-			for (const std::string& texture : textures.textures)
-			{
-				if (textureNameToId.contains(texture))
-					continue;
-
-				textureNameToId[texture] = textureID++;
-			}
-		}
-
-		// Store texture IDs for use during rendering
-		for (const auto& blockTextures : textureNames)
-		{
-			BlockType blockType = blockTextures.first;
-			const BlockTextures& textures = blockTextures.second;
-
-			for (uint32_t i = 0; i < 3; i++)
-			{
-				m_textureIds[blockType].sideIDs[i] = textureNameToId[textures.textures[i]];
-			}
-		}
-
-		uint32_t numXTiles = (uint32_t)glm::ceil(glm::sqrt(textureNameToId.size()));
-		uint32_t numYTiles = (uint32_t)glm::ceil((float)textureNameToId.size() / (float)numXTiles);
+		uint32_t numXTiles = (uint32_t)glm::ceil(glm::sqrt(textureIDs.size()));
+		uint32_t numYTiles = (uint32_t)glm::ceil((float)textureIDs.size() / (float)numXTiles);
 
 		uint32_t textureSheetWidth = numXTiles * TEXTURE_SHEET_TILE_SIZE + (numXTiles - 1) * TEXTURE_SHEET_PADDING;
 		uint32_t textureSheetHeight = numYTiles * TEXTURE_SHEET_TILE_SIZE + (numYTiles - 1) * TEXTURE_SHEET_PADDING;
@@ -1113,13 +777,13 @@ namespace Okay
 		DX_CHECK(m_pDevice->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&pTexture)));
 		pTexture->SetName(L"TextureSheet");
 
-		uploadTextureSheetData(pTexture, frame, textureNameToId);
+		uploadTextureSheetData(pTexture, frame, textureIDs);
 		transitionResource(frame.pCommandList, pTexture, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON);
 
 		return pTexture;
 	}
 
-	void Renderer::uploadTextureSheetData(ID3D12Resource* pTarget, FrameResources& frame, const std::unordered_map<std::string, uint32_t>& textureIds)
+	void Renderer::uploadTextureSheetData(ID3D12Resource* pTarget, FrameResources& frame, const TextureNameIDs& textureIds)
 	{
 		D3D12_RESOURCE_DESC resourceDesc = pTarget->GetDesc();
 		D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
@@ -1401,11 +1065,6 @@ namespace Okay
 		D3D12_RELEASE(pDescriptorHeap);
 		D3D12_RELEASE(pUAVTexture);
 		D3D12_RELEASE(pComputeFence);
-	}
-
-	uint32_t Renderer::getTextureID(BlockType blockType, BlockSide blockSide)
-	{
-		return m_textureIds[blockType].sideIDs[blockSide];
 	}
 
 	ID3D12RootSignature* Renderer::createRootSignature(const D3D12_ROOT_SIGNATURE_DESC* pDesc, std::wstring_view name)

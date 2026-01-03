@@ -116,7 +116,7 @@ namespace db {
     constexpr auto reseed(T seed) -> void {
         permutation = origPermutation;
 
-        std::mt19937 mt(seed);
+        std::mt19937_64 mt(seed);
         std::shuffle(permutation.begin(), permutation.begin() + 256, mt);
         memcpy(permutation.data() + 256, permutation.data(), 256);
     }

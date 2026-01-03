@@ -84,4 +84,9 @@ namespace Okay
 		glm::ivec3 chunkWorldCoord = chunkCoordToWorldCoord(chunkIDToChunkCoord(chunkID));
 		return chunkWorldCoord + chunkBlockCoord;
 	}
+
+	constexpr glm::ivec2 vec3CoordToChunkCoord(const glm::vec3& coord)
+	{
+		return chunkIDToChunkCoord(blockCoordToChunkID(glm::floor(coord)));
+	}
 }
