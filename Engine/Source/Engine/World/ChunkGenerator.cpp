@@ -6,9 +6,6 @@
 #include "Engine/Utilities/Utilities.h"
 #include "Engine/Utilities/Random.h"
 
-#include <map>
-#include <random>
-
 namespace Okay
 {
 	static std::unordered_map<StructureType, StructureDescription> s_structureDescriptions;
@@ -35,15 +32,15 @@ namespace Okay
 
 	void ChunkGenerator::update(const Camera& camera)
 	{
+		if (WorldGenerationData::get().pauseGen)
+			return;
+
 		processLoadingChunks();
 		tryLoadRenderEligableChunks(camera);
 	}
 
 	void ChunkGenerator::processLoadingChunks()
 	{
-		if (WorldGenerationData::get().pauseGen)
-			return;
-
 		for (ChunkGenID chunkGenID : m_completedIDs)
 		{
 			ChunkGenerationThread& chunkGenThread = m_loadingChunks[chunkGenID];
@@ -153,6 +150,11 @@ namespace Okay
 	const ChunkGenerationThread& ChunkGenerator::getChunkGenData(ChunkGenID chunkGenID) const
 	{
 		return m_loadingChunks.find(chunkGenID)->second;
+	}
+
+	bool ChunkGenerator::areChunksLoading() const
+	{
+		return m_loadingChunks.size() > 0;
 	}
 
 	uint32_t ChunkGenerator::findColoumnHeight(const glm::ivec3& blockCoordXZ) const
@@ -312,15 +314,26 @@ namespace Okay
 			return false;
 
 		BlockType block = BlockType::INVALID;
-		if (blockCoordToChunkID(blockCoord) == chunkGeneration.chunkID)
+
+		ChunkID readChunkID = blockCoordToChunkID(blockCoord);
+		glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(blockCoord);
+		uint32_t chunkBlockIdx = chunkBlockCoordToChunkBlockIdx(chunkBlockCoord);
+
+		if (readChunkID == chunkGeneration.chunkID)
 		{
-			glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(blockCoord);
-			uint32_t chunkBlockIdx = chunkBlockCoordToChunkBlockIdx(chunkBlockCoord);
 			block = chunkGeneration.chunkData.blocks[chunkBlockIdx];
 		}
 		else
 		{
-			block = m_pWorld->tryGetBlockThreaded(blockCoord);
+			for (const ChunkGenerationThread::ChunkRef& chunkRef : chunkGeneration.chunkRefs)
+			{
+				if (chunkRef.chunkID == readChunkID)
+				{
+					block = chunkRef.pChunk->blocks[chunkBlockIdx];
+					break;
+				}
+			}
+
 			if (block == BlockType::INVALID)
 				return true;
 		}
@@ -524,6 +537,7 @@ namespace Okay
 		if (!m_pWorld->isChunkLoaded(chunkID))
 			return;
 
+
 		ChunkGenID loadID = s_chunkGenID++;
 		MeshGenID meshGenID = ++m_lastMeshGenIDs[chunkID];
 
@@ -534,7 +548,22 @@ namespace Okay
 		chunkGen.meshGenID = meshGenID;
 
 		memcpy(chunkGen.chunkData.blocks, m_pWorld->getChunkConst(chunkID).blocks, sizeof(Chunk::blocks));
-		chunkGen.blocksGenerated = false;
+
+		glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkID);
+		uint32_t refIdx = 0;
+		for (const glm::ivec2& offset : ADJACENT_CHUNK_OFFSETS)
+		{
+			ChunkID adjacentChunkID = chunkCoordToChunkID(chunkCoord + offset);
+			const Chunk* pAdjacentChunk = m_pWorld->tryGetChunk(adjacentChunkID);
+			if (!pAdjacentChunk)
+				continue;
+
+			chunkGen.chunkRefs[refIdx].chunkID = adjacentChunkID;
+			chunkGen.chunkRefs[refIdx].pChunk = pAdjacentChunk;
+			pAdjacentChunk->meshReadRefCount++;
+
+			refIdx++;
+		}
 
 		ChunkGenerationThread* pChunkGen = &m_loadingChunks[loadID];
 		m_threadPool.queueJob([=]()
@@ -546,17 +575,10 @@ namespace Okay
 
 	void ChunkGenerator::handleMeshUpdates(ChunkID chunkID)
 	{
-		const glm::ivec2 OFFSETS[] =
-		{
-			glm::ivec2(-1,  0),
-			glm::ivec2(1,  0),
-			glm::ivec2(0, -1),
-			glm::ivec2(0,  1),
-		};
 		glm::ivec2 chunkCoord = chunkIDToChunkCoord(chunkID);
 
 		m_chunkMeshUpdates[chunkID] = true;
-		for (const glm::ivec2& offset : OFFSETS)
+		for (const glm::ivec2& offset : ADJACENT_CHUNK_OFFSETS)
 		{
 			ChunkID adjacentChunkID = chunkCoordToChunkID(chunkCoord + offset);
 

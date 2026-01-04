@@ -4,8 +4,6 @@
 #include "Engine/World/Chunk.h"
 #include "Engine/Utilities/ThreadPool.h"
 
-#include <atomic>
-
 namespace Okay
 {
 	constexpr uint32_t TEXTURE_SHEET_TILE_SIZE = 16;
@@ -149,8 +147,6 @@ namespace Okay
 		void createCloudsRenderPass();
 
 	private:
-		ThreadPool m_threadPool;
-
 		ID3D12Device* m_pDevice = nullptr;
 		ID3D12CommandQueue* m_pCommandQueue = nullptr;
 		IDXGISwapChain3* m_pSwapChain = nullptr;

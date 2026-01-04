@@ -55,30 +55,6 @@ void App::onUpdate(TimeStep dt)
 {
 	updateCamera(dt);
 	handleImgui(dt);
-
-	static TimeStep passedTime = 0;
-	static uint32_t numFrames = 0;
-
-	passedTime += dt;
-	numFrames++;
-
-	//printf("%.4f\n", dt * 1000.f);
-
-	if (passedTime >= 1.f)
-	{
-		TimeStep averageFps = passedTime / (float)numFrames;
-		passedTime -= 1.f;
-		numFrames = 0;
-
-		static std::string windowTitle;
-		windowTitle = "D3D12 Voxel Renderer | Fps: " + std::to_string((uint32_t)glm::round(1.f / averageFps));
-		m_window.setWindowTitle(windowTitle);
-
-		glm::vec3 camPos = m_camera.transform.position;
-		glm::ivec2 chunkCoord = chunkIDToChunkCoord(blockCoordToChunkID(camPos));
-
-		//printf("(%d, %d) | (%.1f, %.1f, %.1f)\n", chunkCoord.x, chunkCoord.y, camPos.x, camPos.y, camPos.z);
-	}
 }
 
 void App::updateCamera(TimeStep dt)
@@ -190,7 +166,7 @@ void App::handleImgui(TimeStep dt)
 		
 		WorldGenerationData& worldGenData = WorldGenerationData::get();
 		ImGui::DragInt("Render Distance", (int*)&worldGenData.renderDistance, 0.075f, 0, UINT32_MAX);
-		ImGui::Checkbox("Pause Gen", &worldGenData.pauseGen);
+		ImGui::Checkbox("Pause chunk generation", &worldGenData.pauseGen);
 	}
 	ImGui::End();
 
@@ -229,11 +205,13 @@ void App::handleImgui(TimeStep dt)
 	{
 		ImGui::PushItemWidth(150.f);
 
+		ImGui::BeginDisabled(m_chunkGenerator.areChunksLoading());
 		if (ImGui::Button("Reload World"))
 		{
 			m_world.resetWorld();
 			m_renderer.unloadChunks();
 		}
+		ImGui::EndDisabled();
 
 		WorldGenerationData& worldGenData = WorldGenerationData::get();
 

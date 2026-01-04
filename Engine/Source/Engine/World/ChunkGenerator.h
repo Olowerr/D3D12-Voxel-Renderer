@@ -17,16 +17,35 @@ namespace Okay
 
 	struct ChunkGenerationThread
 	{
-		ChunkID chunkID = INVALID_CHUNK_ID;
-		MeshGenID meshGenID = INVALID_MESH_GEN_ID;
+		struct ChunkRef
+		{
+			ChunkID chunkID = INVALID_CHUNK_ID;
+			const Chunk* pChunk = nullptr;
+		};
 
+		ChunkGenerationThread() = default;
+		~ChunkGenerationThread()
+		{
+			for (ChunkRef& chunkRef : chunkRefs)
+			{
+				if (chunkRef.pChunk)
+					chunkRef.pChunk->meshReadRefCount -= 1;
+			}
+		}
+
+
+		ChunkID chunkID = INVALID_CHUNK_ID;
+
+		std::atomic_bool blocksGenerated;
 		std::vector<Structure> structures;
 		Chunk chunkData;
+
 		MeshData blockMesh;
 		MeshData waterMesh;
+		ChunkRef chunkRefs[4];
+		MeshGenID meshGenID = INVALID_MESH_GEN_ID;
 
 		std::atomic_bool threadFinished;
-		std::atomic_bool blocksGenerated;
 	};
 
 	class ChunkGenerator
@@ -49,6 +68,8 @@ namespace Okay
 		void queueChunkGeneration(ChunkID chunkID);
 		const std::vector<ChunkID>& getCompletedChunks() const;
 		const ChunkGenerationThread& getChunkGenData(ChunkGenID chunkGenID) const;
+
+		bool areChunksLoading() const;
 
 	private:
 		uint32_t findColoumnHeight(const glm::ivec3& blockCoordXZ) const;

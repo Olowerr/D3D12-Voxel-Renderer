@@ -10,14 +10,6 @@
 
 namespace Okay
 {
-	void World::initialize()
-	{
-	}
-
-	void World::shutdown()
-	{
-	}
-
 	void World::update(const Camera& camera, const ChunkGenerator& chunkGenerator, TimeStep dt)
 	{
 		if (WorldGenerationData::get().pauseGen)
@@ -25,41 +17,22 @@ namespace Okay
 
 		clearUpdatedChunks();
 
-		std::unique_lock lock(m_chunkMutex, std::defer_lock_t());
 		for (ChunkGenID chunkGenID : chunkGenerator.getCompletedChunks())
 		{
 			const ChunkGenerationThread& chunkGen = chunkGenerator.getChunkGenData(chunkGenID);
 			ChunkID chunkID = chunkGen.chunkID;
-
 			if (m_loadedChunks.contains(chunkID))
 				continue;
 
-			if (!lock.owns_lock())
-				lock.lock();
-
 			m_loadedChunks[chunkID] = chunkGen.chunkData;
 		}
-		if (lock.owns_lock())
-			lock.unlock();
 
 		updateClouds(camera, dt);
 		unloadDistantChunks(camera);
 	}
 
-	BlockType World::tryGetBlockThreaded(const glm::ivec3& blockCoord) const
-	{
-		ChunkID chunkID = blockCoordToChunkID(blockCoord);
-		glm::ivec3 chunkBlockCoord = blockCoordToChunkBlockCoord(blockCoord);
-		uint32_t chunkBlockIdx = chunkBlockCoordToChunkBlockIdx(chunkBlockCoord);
-
-		std::shared_lock lock(m_chunkMutex);
-		const Chunk* pChunk = tryGetChunk(chunkID);
-		return pChunk ? pChunk->blocks[chunkBlockIdx] : BlockType::INVALID;
-	}
-
 	void World::resetWorld()
 	{
-		std::unique_lock lock(m_chunkMutex);
 		m_loadedChunks.clear();
 	}
 
@@ -198,21 +171,18 @@ namespace Okay
 
 	void World::unloadDistantChunks(const Camera& camera)
 	{
-		std::unique_lock lock(m_chunkMutex, std::defer_lock_t());
-
 		glm::ivec2 camChunkCoord = vec3CoordToChunkCoord(camera.transform.position);
 		auto chunkIterator = m_loadedChunks.begin();
 		while (chunkIterator != m_loadedChunks.end())
 		{
 			ChunkID chunkID = chunkIterator->first;
-			if (isChunkWithinRenderDistance(chunkID, camChunkCoord))
+			const Chunk& chunk = chunkIterator->second;
+
+			if (isChunkWithinRenderDistance(chunkID, camChunkCoord) || chunk.meshReadRefCount > 0)
 			{
 				++chunkIterator;
 				continue;
 			}
-		
-			if (!lock.owns_lock())
-				lock.lock();
 		
 			chunkIterator = m_loadedChunks.erase(chunkIterator);
 			m_removedChunks.emplace_back(chunkID);

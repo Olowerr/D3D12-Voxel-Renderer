@@ -16,7 +16,6 @@ namespace Okay
 		TextureNameIDs textureIDs = initializeTextures();
 
 		m_renderer.initialize(m_window, m_blockTextureIds, textureIDs);
-		m_world.initialize();
 		m_chunkGenerator.initialize(0, m_blockTextureIds, m_world);
 
 		m_camera.viewportDims = m_window.getWindowSize();
@@ -31,7 +30,6 @@ namespace Okay
 	{
 		m_window.shutdown();
 		m_renderer.shutdown();
-		m_world.shutdown();
 		m_chunkGenerator.shutdown();
 
 		glfwTerminate();

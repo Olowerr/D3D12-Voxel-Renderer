@@ -1,9 +1,6 @@
 #pragma once
 #include "Blocks.h"
 
-#include <thread>
-#include <vector>
-
 namespace Okay
 {
 	typedef uint64_t ChunkID;
@@ -15,10 +12,19 @@ namespace Okay
 
 	constexpr uint32_t WORLD_CHUNK_WIDTH = 1'000'000; // How many chunks the world can have in X & Z directions, has to be even
 
+	constexpr glm::ivec2 ADJACENT_CHUNK_OFFSETS[] =
+	{
+		glm::ivec2(-1,  0),
+		glm::ivec2(1,  0),
+		glm::ivec2(0, -1),
+		glm::ivec2(0,  1),
+	};
+
 	struct Chunk // Chunk block coordinate system order: X -> Y -> Z
 	{
 		Chunk() = default;
 		BlockType blocks[MAX_BLOCKS_IN_CHUNK] = {};
+		mutable uint32_t meshReadRefCount = 0;
 	};
 
 	constexpr uint32_t chunkBlockCoordToChunkBlockIdx(const glm::ivec3& chunkBlockCoord)

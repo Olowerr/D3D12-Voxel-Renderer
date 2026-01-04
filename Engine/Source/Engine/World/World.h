@@ -7,9 +7,7 @@
 #include "Engine/Application/Time.h"
 #include "Structure.h"
 
-#include <atomic>
 #include <unordered_map>
-#include <shared_mutex>
 
 namespace Okay
 {
@@ -22,9 +20,6 @@ namespace Okay
 	public:
 		World() = default;
 		~World() = default;
-
-		void initialize();
-		void shutdown();
 
 		void update(const Camera& camera, const ChunkGenerator& chunkGenerator, TimeStep dt);
 
@@ -52,7 +47,6 @@ namespace Okay
 		void sampleCloud(float x, float z);
 
 	private:
-		mutable std::shared_mutex m_chunkMutex;
 		std::unordered_map<ChunkID, Chunk> m_loadedChunks;
 
 		std::vector<ChunkID> m_removedChunks;
