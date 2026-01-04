@@ -5,6 +5,7 @@
 #include "Engine/World/Camera.h"
 #include "Engine/World/ChunkGenerator.h"
 #include "Engine/World/WorldGenSettings.h"
+#include "Engine/Utilities/Utilities.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
@@ -20,14 +21,14 @@ namespace Okay
 		glm::vec3 cameraPos;
 		float padding1;
 	};
-	
+
 	struct GPUCloudsRenderData
 	{
 		glm::vec4 colour = glm::vec4(1.f);
 		glm::vec3 offset = glm::vec3(0.f);
 		float scale = 1.f;
 	};
-	
+
 	struct GPUDrawCallData
 	{
 		glm::vec3 chunkWorldPos = glm::vec3(0.f);
@@ -126,7 +127,7 @@ namespace Okay
 		{
 			wait(frame.pFence, frame.fenceValue);
 			reset(frame.pCommandAllocator, frame.pCommandList);
-			
+
 			// Release all in-direct backBuffer references
 			frame.pCommandList->ClearState(nullptr);
 
@@ -167,7 +168,7 @@ namespace Okay
 
 		updateBuffers(world, camera, chunkGenerator);
 		preRender();
-		renderWorld(world);
+		renderWorld(world, camera);
 		postRender();
 
 		frame.ringBuffer.unmap();
@@ -198,7 +199,7 @@ namespace Okay
 		frame.pCommandList->ClearDepthStencilView(frame.cpuDepthTextureDSV, D3D12_CLEAR_FLAG_DEPTH, 1.f, 0, 0, nullptr);
 	}
 
-	void Renderer::renderWorld(const World& world)
+	void Renderer::renderWorld(const World& world, const Camera& camera)
 	{
 		FrameResources& frame = getCurrentFrameResorces();
 
@@ -217,6 +218,10 @@ namespace Okay
 
 		for (DXChunk& dxChunk : m_dxChunks)
 		{
+			dxChunk.inView = isChunkInView(dxChunk.chunkID, camera);
+			if (!dxChunk.inView)
+				continue;
+
 			GPUDrawCallData drawData = {};
 			drawData.chunkWorldPos = chunkCoordToWorldCoord(chunkIDToChunkCoord(dxChunk.chunkID));
 			dxChunk.drawDataGVA = frame.ringBuffer.allocate(&drawData, sizeof(drawData));
@@ -238,7 +243,7 @@ namespace Okay
 	void Renderer::postRender()
 	{
 		FrameResources& frame = getCurrentFrameResorces();
-		
+
 		frame.pCommandList->SetDescriptorHeaps(1, &m_pImguiDescriptorHeap);
 		imguiEndFrame(frame.pCommandList);
 
@@ -252,7 +257,7 @@ namespace Okay
 
 	void Renderer::drawGPUMeshInfo(const DXChunk& dxChunk, const GPUMeshInfo& gpuMeshInfo)
 	{
-		if (gpuMeshInfo.indicesCount == 0)
+		if (gpuMeshInfo.indicesCount == 0 || !dxChunk.inView)
 			return;
 
 		FrameResources& frame = getCurrentFrameResorces();
@@ -268,7 +273,7 @@ namespace Okay
 		// Function assumes the correct RTV, viewport, etc are already bound
 
 		FrameResources& frame = getCurrentFrameResorces();
-		
+
 		frame.pCommandList->SetGraphicsRootSignature(m_pSkyBoxRootSignature);
 		frame.pCommandList->SetPipelineState(m_pSkyBoxPSO);
 		frame.pCommandList->SetGraphicsRootConstantBufferView(0, m_renderDataGVA);
@@ -488,7 +493,7 @@ namespace Okay
 		D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = pDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
 		cpuHandle.ptr += slotIdx * (uint64_t)m_dsvIncrementSize;
 		m_pDevice->CreateDepthStencilView(pResource, pDesc, cpuHandle);
-		
+
 		return cpuHandle;
 	}
 
@@ -798,7 +803,7 @@ namespace Okay
 		uint8_t* pMappedBuffer = frame.ringBuffer.map();
 
 		// Copy source texture data into ringBuffer, taking padding into consideration
- 		for (const auto& textureInfo : textureIds)
+		for (const auto& textureInfo : textureIds)
 		{
 			const std::string& textureName = textureInfo.first;
 			uint32_t textureId = textureInfo.second;
@@ -812,7 +817,7 @@ namespace Okay
 
 			int sourceWidth, sourceHeight;
 			std::string texturePath = (TEXTURES_PATH / (textureName + ".png")).string();
-			
+
 			uint8_t* pSource = stbi_load(texturePath.c_str(), &sourceWidth, &sourceHeight, nullptr, STBI_rgb_alpha);
 			OKAY_ASSERT(pSource);
 
@@ -1128,13 +1133,13 @@ namespace Okay
 		for (ID3DBlob*& pBlob : pShaderBlobs)
 			D3D12_RELEASE(pBlob);
 
-		
+
 		pipelineDesc.BlendState.RenderTarget[0].BlendEnable = TRUE;
 		pipelineDesc.BlendState.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
 		pipelineDesc.BlendState.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
 		pipelineDesc.BlendState.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
 		pipelineDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
-		
+
 		pipelineDesc.VS = compileShader(SHADER_PATH / "WaterVertexShader.hlsl", "vs_5_1", &pShaderBlobs[shaderBlobIdx++]);
 		pipelineDesc.PS = compileShader(SHADER_PATH / "WaterPixelShader.hlsl", "ps_5_1", &pShaderBlobs[shaderBlobIdx++]);
 		pipelineDesc.NumRenderTargets = 1;
@@ -1183,7 +1188,7 @@ namespace Okay
 		ID3DBlob* pShaderBlobs[5] = {};
 		uint32_t shaderBlobIdx = 0;
 
-		D3D12_ROOT_PARAMETER rootParams[] = 
+		D3D12_ROOT_PARAMETER rootParams[] =
 		{
 			createRootParamCBV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0), // RenderData
 			createRootParamSRV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0),  // CloudData list

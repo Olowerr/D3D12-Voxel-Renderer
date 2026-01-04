@@ -151,8 +151,8 @@ void App::handleImgui(TimeStep dt)
 		ChunkID camChunkID = blockCoordToChunkID(glm::floor(m_camera.transform.position));
 		glm::ivec2 camChunkPos = chunkIDToChunkCoord(camChunkID);
 		
-		ImGui::Text("Avg FPS: %u (%.4f)", uint32_t(1.f / avgDT), avgDT);
-		ImGui::Text("Raw FPS: %u (%.4f)", uint32_t(1.f / dt), dt);
+		ImGui::Text("Avg FPS: %u (%.2f ms)", uint32_t(1.f / avgDT), avgDT * 1000.f);
+		ImGui::Text("Raw FPS: %u (%.2f ms)", uint32_t(1.f / dt), dt * 1000.f);
 
 		ImGui::Separator();
 

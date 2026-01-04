@@ -55,6 +55,7 @@ namespace Okay
 
 		// Set during rendering
 		D3D12_GPU_VIRTUAL_ADDRESS drawDataGVA = INVALID_UINT64;
+		bool inView = true;
 	};
 
 	struct FrameGarbage
@@ -88,7 +89,7 @@ namespace Okay
 	private:
 		void updateBuffers(const World& world, const Camera& camera, const ChunkGenerator& chunkGenerator);
 		void preRender();
-		void renderWorld(const World& world);
+		void renderWorld(const World& world, const Camera& camera);
 		void postRender();
 
 		void drawGPUMeshInfo(const DXChunk& dxChunk, const GPUMeshInfo& gpuMeshInfo);
