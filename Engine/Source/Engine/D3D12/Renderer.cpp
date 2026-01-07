@@ -533,11 +533,15 @@ namespace Okay
 		if (arena.findAllocationSlot(dataSize, &allocatinonHandle))
 			return arena.claimAllocationSlot(dataSize, allocatinonHandle, pOutSlot);
 
-		ID3D12Resource* pOldArenaResource = arena.getDXResource();
-		uint64_t oldSize = pOldArenaResource->GetDesc().Width;
+		ID3D12Resource* pArenaResource = arena.getDXResource();
+		
+		// ResourceArena::resize will release its resource, but we need to make sure it exists for the reminder of this frame
+		pArenaResource->AddRef();
+
+		uint64_t oldSize = pArenaResource->GetDesc().Width;
 		arena.resize(frame.pCommandList, uint64_t((oldSize + dataSize) * 1.25f), D3D12_RESOURCE_STATE_COPY_DEST);
 
-		addToFrameGarbage(pOldArenaResource);
+		addToFrameGarbage(pArenaResource);
 
 		arena.findAllocationSlot(dataSize, &allocatinonHandle);
 		return arena.claimAllocationSlot(dataSize, allocatinonHandle, pOutSlot);

@@ -20,7 +20,7 @@ namespace Okay
 	{
 		uint64_t oldSize = m_pDXResource->GetDesc().Width;
 
-		ID3D12Resource* newResource = createResource(newSize, D3D12_RESOURCE_STATE_COPY_DEST);
+		ID3D12Resource* pNewResource = createResource(newSize, D3D12_RESOURCE_STATE_COPY_DEST);
 
 		D3D12_RESOURCE_BARRIER barriers[2] = {};
 		barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -31,7 +31,7 @@ namespace Okay
 		barriers[0].Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
 		pCommandList->ResourceBarrier(1, barriers);
 		
-		pCommandList->CopyBufferRegion(newResource, 0, m_pDXResource, 0, oldSize);
+		pCommandList->CopyBufferRegion(pNewResource, 0, m_pDXResource, 0, oldSize);
 
 		uint32_t numBarriers = 1;
 		barriers[0].Transition.pResource = m_pDXResource;
@@ -39,15 +39,15 @@ namespace Okay
 		barriers[0].Transition.StateAfter = currentState;
 		if (currentState != D3D12_RESOURCE_STATE_COPY_DEST)
 		{
-			barriers[1].Transition.pResource = newResource;
+			barriers[1].Transition.pResource = pNewResource;
 			barriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
 			barriers[1].Transition.StateAfter = currentState;
 			numBarriers++;
 		}
 		pCommandList->ResourceBarrier(numBarriers, barriers);
-
-
-		m_pDXResource = newResource;
+		
+		D3D12_RELEASE(m_pDXResource);
+		m_pDXResource = pNewResource;
 
 		// Handles potential slot merging
 		removeAllocation(ResourceSlot(oldSize, newSize - oldSize));

@@ -23,8 +23,6 @@ namespace Okay
 
 		void update(const Camera& camera, const ChunkGenerator& chunkGenerator, TimeStep dt);
 
-		BlockType tryGetBlockThreaded(const glm::ivec3& blockCoord) const;
-
 		Chunk& getChunk(ChunkID chunkID);
 		const Chunk& getChunkConst(ChunkID chunkID) const;
 		const Chunk* tryGetChunk(ChunkID chunkID) const;

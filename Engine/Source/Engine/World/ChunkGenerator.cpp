@@ -13,7 +13,8 @@ namespace Okay
 
 	void ChunkGenerator::initialize(uint64_t seed, const BlockTextureIDs& blockTextureIDs, const World& world)
 	{
-		m_threadPool.initialize(std::thread::hardware_concurrency());
+		uint32_t numThreads = std::thread::hardware_concurrency();
+		m_threadPool.initialize(numThreads);
 		s_structureDescriptions[StructureType::TREE] = createTreeDescription();
 		m_pBlockTextureIds = &blockTextureIDs;
 		m_pWorld = &world;

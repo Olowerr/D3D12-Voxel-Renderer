@@ -23,7 +23,6 @@ namespace Okay
 		void initialize(ID3D12Device* pDevice, uint64_t resourceSize, D3D12_RESOURCE_STATES initialState);
 		void shutdown();
 
-		// Assumes the release of the dxResource is handled by the caller after the function call
 		void resize(ID3D12GraphicsCommandList* pCommandList, uint64_t newSize, D3D12_RESOURCE_STATES currentState);
 		void clear();
 
