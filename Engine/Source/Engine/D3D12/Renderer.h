@@ -69,6 +69,42 @@ namespace Okay
 		IUnknown* pDxUnknown = nullptr; // Base class containing Release()
 	};
 
+	enum struct RenderPassType
+	{
+		None = 0,
+		Graphic,
+		Compute,
+	};
+
+	struct RenderPassSpecification // C:<
+	{
+		RenderPassSpecification() = default;
+		RenderPassSpecification(RenderPassType type)
+			:type(type)
+		{
+		}
+
+		RenderPassType type = RenderPassType::None;
+		std::wstring_view dbgName;
+
+		union
+		{
+			D3D12_GRAPHICS_PIPELINE_STATE_DESC graphicsDesc = {};
+			D3D12_COMPUTE_PIPELINE_STATE_DESC computeDesc;
+		};
+
+		FilePath vsPath;
+		FilePath hsPath;
+		FilePath dsPath;
+		FilePath gsPath;
+		FilePath psPath;
+
+		FilePath csPath;
+
+		std::vector<D3D12_ROOT_PARAMETER> rootParams;
+		std::vector<D3D12_STATIC_SAMPLER_DESC> staticSamplers;
+	};
+
 	class Renderer
 	{
 	public:
@@ -139,13 +175,14 @@ namespace Okay
 		ID3D12Resource* createCommittedBuffer(uint64_t size, D3D12_RESOURCE_STATES initialState, D3D12_HEAP_TYPE heapType, std::wstring_view name);
 
 		ID3D12Resource* createTextureSheet(FrameResources& frame, const BlockTextureIDs& blockTextureIDs, const TextureNameIDs& textureIDs);
-		void uploadTextureSheetData(ID3D12Resource* pTarget, FrameResources& frame, const std::unordered_map<std::string, uint32_t>& textureIds);
+		void uploadTextureSheetData(ID3D12Resource* pTarget, FrameResources& frame, const TextureNameIDs& textureIds);
 		void generateTextureSheetMipMaps(ID3D12Resource* pTextureSheet, uint32_t tileSize);
-		uint32_t getTextureID(BlockType blockType, BlockSide blockSide);
 
 		void createVoxelRenderPass();
 		void createSkyboxRenderPass();
 		void createCloudsRenderPass();
+
+		void createRenderPass(const RenderPassSpecification& spec, ID3D12RootSignature** ppOutRS, ID3D12PipelineState** ppOutPSO);
 
 	private:
 		ID3D12Device* m_pDevice = nullptr;

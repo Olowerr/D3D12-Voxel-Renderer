@@ -10,6 +10,9 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
 
+#define DEBUG_LAYERS_ENABLED
+#define GPU_BASED_VALIDATION_ENABLED
+
 namespace Okay
 {
 	struct GPURenderData
@@ -36,8 +39,10 @@ namespace Okay
 
 	void Renderer::initialize(Window& window, const BlockTextureIDs& blockTextureIDs, const TextureNameIDs& textureIDs)
 	{
-#if 0
+#ifdef DEBUG_LAYERS_ENABLED
 		enableDebugLayer();
+#endif
+#ifdef GPU_BASED_VALIDATION_ENABLED
 		enableGPUBasedValidation();
 #endif
 
@@ -95,7 +100,6 @@ namespace Okay
 		for (FrameGarbage& frameGarbage : m_frameGarbage)
 			D3D12_RELEASE(frameGarbage.pDxUnknown);
 
-		D3D12_RELEASE(m_pDevice);
 		D3D12_RELEASE(m_pCommandQueue);
 		D3D12_RELEASE(m_pSwapChain);
 
@@ -119,6 +123,17 @@ namespace Okay
 
 		D3D12_RELEASE(m_pImguiDescriptorHeap);
 		imguiShutdown();
+
+#ifdef DEBUG_LAYERS_ENABLED
+		ID3D12DebugDevice* pDebugDevice = nullptr;
+		DX_CHECK(m_pDevice->QueryInterface<ID3D12DebugDevice>(&pDebugDevice));
+
+		// This reports that the device is alive but it's just its own ref to it. Standard reporting shows all references are released
+		pDebugDevice->ReportLiveDeviceObjects(D3D12_RLDO_DETAIL | D3D12_RLDO_IGNORE_INTERNAL);
+		D3D12_RELEASE(pDebugDevice);
+#endif
+
+		D3D12_RELEASE(m_pDevice);
 	}
 
 	void Renderer::onResize(uint32_t width, uint32_t height)
@@ -1099,133 +1114,148 @@ namespace Okay
 
 	void Renderer::createVoxelRenderPass()
 	{
-		std::vector<D3D12_ROOT_PARAMETER> rootParams;
-		rootParams.emplace_back(createRootParamCBV(D3D12_SHADER_VISIBILITY_ALL, 0, 0));
-		rootParams.emplace_back(createRootParamCBV(D3D12_SHADER_VISIBILITY_VERTEX, 1, 0));
-		rootParams.emplace_back(createRootParamSRV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0));
+		RenderPassSpecification voxelPass = RenderPassType::Graphic;
+		voxelPass.graphicsDesc = createDefaultGraphicsPipelineStateDesc();
+		voxelPass.graphicsDesc.NumRenderTargets = 1;
+		voxelPass.graphicsDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+		voxelPass.graphicsDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+
+		voxelPass.vsPath = SHADER_PATH / "VertexShader.hlsl";
+		voxelPass.psPath = SHADER_PATH / "PixelShader.hlsl";
 
 		D3D12_DESCRIPTOR_RANGE textureRange = createRangeSRV(1, 0, 1, 0);
-		rootParams.emplace_back(createRootParamTable(D3D12_SHADER_VISIBILITY_ALL, &textureRange, 1));
+		voxelPass.rootParams =
+		{
+			createRootParamCBV(D3D12_SHADER_VISIBILITY_ALL, 0, 0),
+			createRootParamCBV(D3D12_SHADER_VISIBILITY_VERTEX, 1, 0),
+			createRootParamSRV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0),
+			createRootParamTable(D3D12_SHADER_VISIBILITY_ALL, &textureRange, 1)
+		};
 
 		D3D12_STATIC_SAMPLER_DESC pointSampler = createDefaultStaticPointSamplerDesc();
 		pointSampler.Filter = D3D12_FILTER_MIN_MAG_POINT_MIP_LINEAR;
 		pointSampler.MaxLOD = 4;
+		voxelPass.staticSamplers = { pointSampler };
 
-		D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
-		rootDesc.NumParameters = (uint32_t)rootParams.size();
-		rootDesc.pParameters = rootParams.data();
-		rootDesc.NumStaticSamplers = 1;
-		rootDesc.pStaticSamplers = &pointSampler;
-		rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
-
-		m_pVoxelRootSignature = createRootSignature(&rootDesc, L"VoxelRootSignature");
+		createRenderPass(voxelPass, &m_pVoxelRootSignature, &m_pVoxelPSO);
 
 
-		ID3DBlob* pShaderBlobs[5] = {};
-		uint32_t shaderBlobIdx = 0;
+		RenderPassSpecification waterPass = RenderPassType::Graphic;
+		waterPass.graphicsDesc = createDefaultGraphicsPipelineStateDesc();
+		waterPass.graphicsDesc.pRootSignature = m_pVoxelRootSignature;
+		waterPass.graphicsDesc.BlendState.RenderTarget[0].BlendEnable = TRUE;
+		waterPass.graphicsDesc.BlendState.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+		waterPass.graphicsDesc.BlendState.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+		waterPass.graphicsDesc.BlendState.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+		waterPass.graphicsDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+		waterPass.graphicsDesc.NumRenderTargets = 1;
+		waterPass.graphicsDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+		waterPass.graphicsDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 
-		D3D12_GRAPHICS_PIPELINE_STATE_DESC pipelineDesc = createDefaultGraphicsPipelineStateDesc();
-		pipelineDesc.pRootSignature = m_pVoxelRootSignature;
-		pipelineDesc.VS = compileShader(SHADER_PATH / "VertexShader.hlsl", "vs_5_1", &pShaderBlobs[shaderBlobIdx++]);
-		pipelineDesc.PS = compileShader(SHADER_PATH / "PixelShader.hlsl", "ps_5_1", &pShaderBlobs[shaderBlobIdx++]);
-		pipelineDesc.NumRenderTargets = 1;
-		pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-		pipelineDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+		waterPass.vsPath = SHADER_PATH / "WaterVertexShader.hlsl";
+		waterPass.psPath = SHADER_PATH / "WaterPixelShader.hlsl";
 
-		DX_CHECK(m_pDevice->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_pVoxelPSO)));
-
-		for (ID3DBlob*& pBlob : pShaderBlobs)
-			D3D12_RELEASE(pBlob);
-
-
-		pipelineDesc.BlendState.RenderTarget[0].BlendEnable = TRUE;
-		pipelineDesc.BlendState.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
-		pipelineDesc.BlendState.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
-		pipelineDesc.BlendState.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
-		pipelineDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
-
-		pipelineDesc.VS = compileShader(SHADER_PATH / "WaterVertexShader.hlsl", "vs_5_1", &pShaderBlobs[shaderBlobIdx++]);
-		pipelineDesc.PS = compileShader(SHADER_PATH / "WaterPixelShader.hlsl", "ps_5_1", &pShaderBlobs[shaderBlobIdx++]);
-		pipelineDesc.NumRenderTargets = 1;
-		pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-		pipelineDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
-
-		DX_CHECK(m_pDevice->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_pWaterPSO)));
-
-		for (ID3DBlob*& pBlob : pShaderBlobs)
-			D3D12_RELEASE(pBlob);
+		createRenderPass(waterPass, nullptr, &m_pWaterPSO);
 	}
 
 	void Renderer::createSkyboxRenderPass()
 	{
-		ID3DBlob* pShaderBlobs[5] = {};
-		uint32_t shaderBlobIdx = 0;
+		RenderPassSpecification skyBoxSpec = RenderPassType::Graphic;
+		skyBoxSpec.graphicsDesc = createDefaultGraphicsPipelineStateDesc();
+		skyBoxSpec.graphicsDesc.pRootSignature = m_pSkyBoxRootSignature;
+		skyBoxSpec.graphicsDesc.NumRenderTargets = 1;
+		skyBoxSpec.graphicsDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+		skyBoxSpec.graphicsDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+		skyBoxSpec.graphicsDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+		skyBoxSpec.graphicsDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+
+		skyBoxSpec.vsPath = SHADER_PATH / "SkyBoxVS.hlsl";
+		skyBoxSpec.psPath = SHADER_PATH / "SkyBoxPS.hlsl";
 
 		D3D12_ROOT_PARAMETER cameraParam = createRootParamCBV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0);
+		skyBoxSpec.rootParams = { cameraParam };
 
-		D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
-		rootDesc.NumParameters = 1;
-		rootDesc.pParameters = &cameraParam;
-		rootDesc.NumStaticSamplers = 0;
-		rootDesc.pStaticSamplers = nullptr;
-		rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
-		m_pSkyBoxRootSignature = createRootSignature(&rootDesc, L"SkyboxRootSignature");
-
-		D3D12_GRAPHICS_PIPELINE_STATE_DESC pipelineDesc = createDefaultGraphicsPipelineStateDesc();
-		pipelineDesc.pRootSignature = m_pSkyBoxRootSignature;
-		pipelineDesc.VS = compileShader(SHADER_PATH / "SkyBoxVS.hlsl", "vs_5_1", &pShaderBlobs[shaderBlobIdx++]);
-		pipelineDesc.PS = compileShader(SHADER_PATH / "SkyBoxPS.hlsl", "ps_5_1", &pShaderBlobs[shaderBlobIdx++]);
-		pipelineDesc.NumRenderTargets = 1;
-		pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-		pipelineDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-		pipelineDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-		pipelineDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
-
-		DX_CHECK(m_pDevice->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_pSkyBoxPSO)));
-
-		for (ID3DBlob*& pBlob : pShaderBlobs)
-			D3D12_RELEASE(pBlob);
+		createRenderPass(skyBoxSpec, &m_pSkyBoxRootSignature, &m_pSkyBoxPSO);
 	}
 
 	void Renderer::createCloudsRenderPass()
 	{
-		ID3DBlob* pShaderBlobs[5] = {};
-		uint32_t shaderBlobIdx = 0;
+		RenderPassSpecification cloudPass = RenderPassType::Graphic;
+		cloudPass.graphicsDesc = createDefaultGraphicsPipelineStateDesc();
+		cloudPass.graphicsDesc.NumRenderTargets = 1;
+		cloudPass.graphicsDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+		cloudPass.graphicsDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+		cloudPass.graphicsDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
 
-		D3D12_ROOT_PARAMETER rootParams[] =
+		cloudPass.graphicsDesc.BlendState.RenderTarget[0].BlendEnable = TRUE;
+		cloudPass.graphicsDesc.BlendState.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+		cloudPass.graphicsDesc.BlendState.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+		cloudPass.graphicsDesc.BlendState.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+		cloudPass.graphicsDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+
+		cloudPass.vsPath = SHADER_PATH / "CloudsVS.hlsl";
+		cloudPass.psPath = SHADER_PATH / "CloudsPS.hlsl";
+
+		cloudPass.rootParams =
 		{
 			createRootParamCBV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0), // RenderData
-			createRootParamSRV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0),  // CloudData list
-			createRootParamCBV(D3D12_SHADER_VISIBILITY_VERTEX, 1, 0),  // CloudRenderData
+			createRootParamSRV(D3D12_SHADER_VISIBILITY_VERTEX, 0, 0), // CloudData list
+			createRootParamCBV(D3D12_SHADER_VISIBILITY_VERTEX, 1, 0), // CloudRenderData
 		};
 
-		D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
-		rootDesc.NumParameters = _countof(rootParams);
-		rootDesc.pParameters = rootParams;
-		rootDesc.NumStaticSamplers = 0;
-		rootDesc.pStaticSamplers = nullptr;
-		rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
-		m_pCloudsRootSignature = createRootSignature(&rootDesc, L"CloudsRootSignature");
+		createRenderPass(cloudPass, &m_pCloudsRootSignature, &m_pCloudsPSO);
+	}
 
-		D3D12_GRAPHICS_PIPELINE_STATE_DESC pipelineDesc = createDefaultGraphicsPipelineStateDesc();
-		pipelineDesc.pRootSignature = m_pCloudsRootSignature;
-		pipelineDesc.VS = compileShader(SHADER_PATH / "CloudsVS.hlsl", "vs_5_1", &pShaderBlobs[shaderBlobIdx++]);
-		pipelineDesc.PS = compileShader(SHADER_PATH / "CloudsPS.hlsl", "ps_5_1", &pShaderBlobs[shaderBlobIdx++]);
-		pipelineDesc.NumRenderTargets = 1;
-		pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-		pipelineDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+	void Renderer::createRenderPass(const RenderPassSpecification& spec, ID3D12RootSignature** ppOutRS, ID3D12PipelineState** ppOutPSO)
+	{
+		OKAY_ASSERT(spec.type != RenderPassType::None);
 
-		pipelineDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+		ID3D12RootSignature* pRootSignature = nullptr;
+		if (spec.graphicsDesc.pRootSignature || spec.computeDesc.pRootSignature)
+		{
+			pRootSignature = spec.type == RenderPassType::Graphic ? spec.graphicsDesc.pRootSignature : spec.computeDesc.pRootSignature;
+		}
+		else
+		{
+			D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
+			rootDesc.NumParameters = (uint32_t)spec.rootParams.size();
+			rootDesc.pParameters = spec.rootParams.data();
+			rootDesc.NumStaticSamplers = (uint32_t)spec.staticSamplers.size();
+			rootDesc.pStaticSamplers = spec.staticSamplers.data();
+			rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
 
-		pipelineDesc.BlendState.RenderTarget[0].BlendEnable = TRUE;
-		pipelineDesc.BlendState.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
-		pipelineDesc.BlendState.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
-		pipelineDesc.BlendState.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
-		pipelineDesc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+			pRootSignature = createRootSignature(&rootDesc, std::wstring(spec.dbgName) + L"RootSignature");
+			*ppOutRS = pRootSignature;
+		}
 
-		DX_CHECK(m_pDevice->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&m_pCloudsPSO)));
 
-		for (ID3DBlob*& pBlob : pShaderBlobs)
-			D3D12_RELEASE(pBlob);
+		ID3DBlob* pShaderBlobs[5] = {};
+		uint32_t blobIdx = 0;
+
+		if (spec.type == RenderPassType::Graphic)
+		{
+			D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = spec.graphicsDesc;
+			psoDesc.VS = !spec.vsPath.empty() ? compileShader(spec.vsPath, "vs_5_1", &pShaderBlobs[blobIdx++]) : D3D12_SHADER_BYTECODE{};
+			psoDesc.HS = !spec.hsPath.empty() ? compileShader(spec.hsPath, "hs_5_1", &pShaderBlobs[blobIdx++]) : D3D12_SHADER_BYTECODE{};
+			psoDesc.DS = !spec.dsPath.empty() ? compileShader(spec.dsPath, "ds_5_1", &pShaderBlobs[blobIdx++]) : D3D12_SHADER_BYTECODE{};
+			psoDesc.GS = !spec.gsPath.empty() ? compileShader(spec.gsPath, "gs_5_1", &pShaderBlobs[blobIdx++]) : D3D12_SHADER_BYTECODE{};
+			psoDesc.PS = !spec.psPath.empty() ? compileShader(spec.psPath, "ps_5_1", &pShaderBlobs[blobIdx++]) : D3D12_SHADER_BYTECODE{};
+
+			psoDesc.pRootSignature = pRootSignature;
+			DX_CHECK(m_pDevice->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(ppOutPSO)));
+			(*ppOutPSO)->SetName((std::wstring(spec.dbgName) + L"PipelineState").c_str());
+		}
+		else // RenderPassType::Compute
+		{
+			D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = spec.computeDesc;
+			psoDesc.CS = !spec.csPath.empty() ? compileShader(spec.csPath, "cs_5_1", &pShaderBlobs[blobIdx++]) : D3D12_SHADER_BYTECODE{};
+
+			psoDesc.pRootSignature = pRootSignature;
+			DX_CHECK(m_pDevice->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(ppOutPSO)));
+			(*ppOutPSO)->SetName((std::wstring(spec.dbgName) + L"PipelineState").c_str());
+		}
+
+		for (ID3DBlob* pShaderBlob : pShaderBlobs)
+			D3D12_RELEASE(pShaderBlob);
 	}
 }
