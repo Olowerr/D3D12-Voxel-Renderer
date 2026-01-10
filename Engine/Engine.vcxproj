@@ -30,6 +30,7 @@
     <ClInclude Include="Deps\Include\imgui\imstb_textedit.h" />
     <ClInclude Include="Deps\Include\imgui\imstb_truetype.h" />
     <ClInclude Include="Source\Engine\Application\Application.h" />
+    <ClInclude Include="Source\Engine\D3D12\DescriptorHeap.h" />
     <ClInclude Include="Source\Engine\Utilities\Utilities.h" />
     <ClInclude Include="Source\Engine\World\ChunkGenerator.h" />
     <ClInclude Include="Source\Engine\Application\ImguiHelper.h" />
@@ -67,6 +68,7 @@
     <ClCompile Include="Deps\Include\imgui\implot_demo.cpp" />
     <ClCompile Include="Deps\Include\imgui\implot_items.cpp" />
     <ClCompile Include="Source\Engine\Application\Application.cpp" />
+    <ClCompile Include="Source\Engine\D3D12\DescriptorHeap.cpp" />
     <ClCompile Include="Source\Engine\Utilities\Utilities.cpp" />
     <ClCompile Include="Source\Engine\World\ChunkGenerator.cpp" />
     <ClCompile Include="Source\Engine\Application\ImguiHelper.cpp" />

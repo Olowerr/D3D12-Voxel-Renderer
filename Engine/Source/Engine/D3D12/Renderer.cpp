@@ -52,13 +52,9 @@ namespace Okay
 		createDevice(pFactory);
 		createCommandQueue();
 
-		m_pRTVDescHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_RTV, MAX_FRAMES_IN_FLIGHT, false, L"BackBufferRTVDescriptorHeap");
-		m_pDSVDescHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_DSV, MAX_FRAMES_IN_FLIGHT, false, L"DepthTextureDSVDescriptorHeap");
-		m_pTextureDescHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, true, L"TexturesSRVDescriptorHeap");
-
-		m_rtvIncrementSize = m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-		m_dsvIncrementSize = m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
-		m_cbvSrvUavIncrementSize = m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		m_RTVDescriptorHeap.initialize(m_pDevice, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, MAX_FRAMES_IN_FLIGHT, false, L"BackBufferRTVDescriptorHeap");
+		m_DSVDescriptorHeap.initialize(m_pDevice, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, MAX_FRAMES_IN_FLIGHT, false, L"DepthTextureDSVDescriptorHeap");
+		m_SRVUAVDescriptorHeap.initialize(m_pDevice, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, true, L"TexturesSRVDescriptorHeap");
 
 		createSwapChain(pFactory, window);
 		D3D12_RELEASE(pFactory);
@@ -80,7 +76,7 @@ namespace Okay
 		reset(initFrame.pCommandAllocator, initFrame.pCommandList);
 
 		m_pTextureSheet = createTextureSheet(initFrame, blockTextureIDs, textureIDs);
-		m_textureHandle = createSRVDescriptor(m_pTextureDescHeap, 0, m_pTextureSheet, nullptr);
+		m_textureHandle = m_SRVUAVDescriptorHeap.createSRVDescriptor(0, m_pTextureSheet, nullptr);
 
 		flush(initFrame.pCommandList, initFrame.pCommandAllocator, initFrame.pFence, initFrame.fenceValue);
 		shutdowFrameResources(initFrame);
@@ -88,8 +84,8 @@ namespace Okay
 		generateTextureSheetMipMaps(m_pTextureSheet, TEXTURE_SHEET_TILE_SIZE);
 
 		// In this version of Imgui, only 1 SRV is needed, it's stated that future versions will need more, but I don't see a reason to switch version atm :]
-		m_pImguiDescriptorHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, true, L"Imgui");
-		imguiInitialize(window, m_pDevice, m_pCommandQueue, m_pImguiDescriptorHeap, MAX_FRAMES_IN_FLIGHT);
+		m_imguiDescriptorHeap.initialize(m_pDevice, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, true, L"ImguiDescriptorHeap");
+		imguiInitialize(window, m_pDevice, m_pCommandQueue, m_imguiDescriptorHeap.getD3D12DescriptorHeap(), MAX_FRAMES_IN_FLIGHT);
 	}
 
 	void Renderer::shutdown()
@@ -114,14 +110,14 @@ namespace Okay
 		D3D12_RELEASE(m_pCloudsRootSignature);
 		D3D12_RELEASE(m_pCloudsPSO);
 
-		D3D12_RELEASE(m_pRTVDescHeap);
-		D3D12_RELEASE(m_pDSVDescHeap);
-		D3D12_RELEASE(m_pTextureDescHeap);
+		m_RTVDescriptorHeap.shutdown();
+		m_DSVDescriptorHeap.shutdown();
+		m_SRVUAVDescriptorHeap.shutdown();
 
 		m_gpuVertexData.shutdown();
 		m_gpuIndicesData.shutdown();
 
-		D3D12_RELEASE(m_pImguiDescriptorHeap);
+		m_imguiDescriptorHeap.shutdown();
 		imguiShutdown();
 
 #ifdef DEBUG_LAYERS_ENABLED
@@ -221,7 +217,8 @@ namespace Okay
 		frame.pCommandList->SetGraphicsRootSignature(m_pVoxelRootSignature);
 		frame.pCommandList->SetPipelineState(m_pVoxelPSO);
 
-		frame.pCommandList->SetDescriptorHeaps(1, &m_pTextureDescHeap);
+		ID3D12DescriptorHeap* pDxSrvDescriptorHeap = m_SRVUAVDescriptorHeap.getD3D12DescriptorHeap();
+		frame.pCommandList->SetDescriptorHeaps(1, &pDxSrvDescriptorHeap);
 		frame.pCommandList->SetGraphicsRootDescriptorTable(3, m_textureHandle);
 
 		frame.pCommandList->SetGraphicsRootConstantBufferView(0, m_renderDataGVA);
@@ -259,7 +256,8 @@ namespace Okay
 	{
 		FrameResources& frame = getCurrentFrameResorces();
 
-		frame.pCommandList->SetDescriptorHeaps(1, &m_pImguiDescriptorHeap);
+		ID3D12DescriptorHeap* pDxImguiDescriptorHeap = m_imguiDescriptorHeap.getD3D12DescriptorHeap();
+		frame.pCommandList->SetDescriptorHeaps(1, &pDxImguiDescriptorHeap);
 		imguiEndFrame(frame.pCommandList);
 
 		transitionResource(frame.pCommandList, frame.pBackBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
@@ -490,56 +488,6 @@ namespace Okay
 		}
 	}
 
-	D3D12_CPU_DESCRIPTOR_HANDLE Renderer::createRTVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc)
-	{
-		OKAY_ASSERT(pResource || pDesc);
-
-		D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = pDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-		cpuHandle.ptr += slotIdx * (uint64_t)m_rtvIncrementSize;
-		m_pDevice->CreateRenderTargetView(pResource, pDesc, cpuHandle);
-
-		return cpuHandle;
-	}
-
-	D3D12_CPU_DESCRIPTOR_HANDLE Renderer::createDSVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_DEPTH_STENCIL_VIEW_DESC* pDesc)
-	{
-		OKAY_ASSERT(pResource || pDesc);
-
-		D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = pDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-		cpuHandle.ptr += slotIdx * (uint64_t)m_dsvIncrementSize;
-		m_pDevice->CreateDepthStencilView(pResource, pDesc, cpuHandle);
-
-		return cpuHandle;
-	}
-
-	D3D12_GPU_DESCRIPTOR_HANDLE Renderer::createSRVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_SHADER_RESOURCE_VIEW_DESC* pDesc)
-	{
-		OKAY_ASSERT(pResource || pDesc);
-
-		D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = pDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-		cpuHandle.ptr += slotIdx * (uint64_t)m_cbvSrvUavIncrementSize;
-		m_pDevice->CreateShaderResourceView(pResource, pDesc, cpuHandle);
-
-		// returns for convenience
-		D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = pDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
-		gpuHandle.ptr += slotIdx * (uint64_t)m_cbvSrvUavIncrementSize;
-		return gpuHandle;
-	}
-
-	D3D12_GPU_DESCRIPTOR_HANDLE Renderer::createUAVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_UNORDERED_ACCESS_VIEW_DESC* pDesc)
-	{
-		OKAY_ASSERT(pResource || pDesc);
-
-		D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = pDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-		cpuHandle.ptr += slotIdx * (uint64_t)m_cbvSrvUavIncrementSize;
-		m_pDevice->CreateUnorderedAccessView(pResource, nullptr, pDesc, cpuHandle);
-
-		// returns for convenience
-		D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = pDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
-		gpuHandle.ptr += slotIdx * (uint64_t)m_cbvSrvUavIncrementSize;
-		return gpuHandle;
-	}
-
 	D3D12_GPU_VIRTUAL_ADDRESS Renderer::allocateIntoResourceArena(ResourceArena& arena, ResourceSlot* pOutSlot, const void* pData, uint64_t dataSize)
 	{
 		FrameResources& frame = getCurrentFrameResorces();
@@ -692,7 +640,7 @@ namespace Okay
 
 			// Back Buffer
 			DX_CHECK(m_pSwapChain->GetBuffer(i, IID_PPV_ARGS(&frame.pBackBuffer)));
-			frame.cpuBackBufferRTV = createRTVDescriptor(m_pRTVDescHeap, i, frame.pBackBuffer, nullptr);
+			frame.cpuBackBufferRTV = m_RTVDescriptorHeap.createRTVDescriptor(i, frame.pBackBuffer, nullptr);
 
 
 			// Depth
@@ -701,11 +649,7 @@ namespace Okay
 			textureDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
 			clearValue.Format = textureDesc.Format;
 			DX_CHECK(m_pDevice->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &textureDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &clearValue, IID_PPV_ARGS(&frame.pDepthTexture)));
-
-			frame.cpuDepthTextureDSV = m_pDSVDescHeap->GetCPUDescriptorHandleForHeapStart();
-			frame.cpuDepthTextureDSV.ptr += (uint64_t)i * m_dsvIncrementSize;
-
-			m_pDevice->CreateDepthStencilView(frame.pDepthTexture, nullptr, frame.cpuDepthTextureDSV);
+			frame.cpuDepthTextureDSV = m_DSVDescriptorHeap.createDSVDescriptor(i, frame.pDepthTexture, nullptr);
 
 
 			// Viewport & ScissorRect
@@ -1001,8 +945,10 @@ namespace Okay
 			D3D12_RELEASE(pShaderBlob);
 		}
 
+		DescriptorHeap descriptorHeap;
+		descriptorHeap.initialize(m_pDevice, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, textureDesc.MipLevels * 2, true, L"MipMapDescriptorHeap");
+		ID3D12DescriptorHeap* pDxDescriptorHeap = descriptorHeap.getD3D12DescriptorHeap();
 
-		ID3D12DescriptorHeap* pDescriptorHeap = createDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, textureDesc.MipLevels * 2, true, L"MipMapTextureSheet");
 		ID3D12Resource* pUAVTexture = nullptr;
 		{
 			D3D12_HEAP_PROPERTIES heapProperties = {};
@@ -1051,15 +997,15 @@ namespace Okay
 
 		pComputeList->SetComputeRootSignature(pComputeSignature);
 		pComputeList->SetPipelineState(pComputePSO);
-		pComputeList->SetDescriptorHeaps(1, &pDescriptorHeap);
+		pComputeList->SetDescriptorHeaps(1, &pDxDescriptorHeap);
 
 		for (uint32_t i = 0; i < textureDesc.MipLevels - 1u; i++)
 		{
 			sourceSRV.Texture2D.MostDetailedMip = i;
 			targetUAV.Texture2D.MipSlice = i + 1;
 
-			D3D12_GPU_DESCRIPTOR_HANDLE descriptor0Handle = createSRVDescriptor(pDescriptorHeap, (i * 2), pUAVTexture, &sourceSRV);
-			createUAVDescriptor(pDescriptorHeap, (i * 2) + 1, pUAVTexture, &targetUAV); // Descriptor 1 Handle
+			D3D12_GPU_DESCRIPTOR_HANDLE descriptor0Handle = descriptorHeap.createSRVDescriptor((i * 2), pUAVTexture, &sourceSRV);
+			descriptorHeap.createUAVDescriptor((i * 2) + 1, pUAVTexture, &targetUAV); // Descriptor 1 Handle
 
 			uint32_t mipWidth = glm::max(1u, (uint32_t)textureDesc.Width / (uint32_t)glm::pow(2, i));
 			uint32_t mipHeight = glm::max(1u, textureDesc.Height / (uint32_t)glm::pow(2, i));
@@ -1084,9 +1030,9 @@ namespace Okay
 		D3D12_RELEASE(pComputeList);
 		D3D12_RELEASE(pComputeSignature);
 		D3D12_RELEASE(pComputePSO);
-		D3D12_RELEASE(pDescriptorHeap);
 		D3D12_RELEASE(pUAVTexture);
 		D3D12_RELEASE(pComputeFence);
+		descriptorHeap.shutdown();
 	}
 
 	ID3D12RootSignature* Renderer::createRootSignature(const D3D12_ROOT_SIGNATURE_DESC* pDesc, std::wstring_view name)

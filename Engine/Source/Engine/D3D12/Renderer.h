@@ -1,6 +1,7 @@
 #pragma once
 #include "RingBuffer.h"
 #include "ResourceArena.h"
+#include "DescriptorHeap.h"
 #include "Engine/World/Chunk.h"
 #include "Engine/Utilities/ThreadPool.h"
 
@@ -149,11 +150,6 @@ namespace Okay
 		void writeMeshData(GPUMeshInfo& gpuMeshInfo, const MeshData& meshData);
 		void findAndDeleteDXChunk(ChunkID chunkID);
 
-		D3D12_CPU_DESCRIPTOR_HANDLE createRTVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_RENDER_TARGET_VIEW_DESC* pDesc);
-		D3D12_CPU_DESCRIPTOR_HANDLE createDSVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_DEPTH_STENCIL_VIEW_DESC* pDesc);
-		D3D12_GPU_DESCRIPTOR_HANDLE createSRVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_SHADER_RESOURCE_VIEW_DESC* pDesc);
-		D3D12_GPU_DESCRIPTOR_HANDLE createUAVDescriptor(ID3D12DescriptorHeap* pDescriptorHeap, uint32_t slotIdx, ID3D12Resource* pResource, const D3D12_UNORDERED_ACCESS_VIEW_DESC* pDesc);
-
 		D3D12_GPU_VIRTUAL_ADDRESS allocateIntoResourceArena(ResourceArena& arena, ResourceSlot* pOutSlot, const void* pData, uint64_t dataSize);
 
 		FrameResources& getCurrentFrameResorces();
@@ -192,9 +188,9 @@ namespace Okay
 		FrameResources m_frames[MAX_FRAMES_IN_FLIGHT] = {};
 		std::vector<FrameGarbage> m_frameGarbage;
 
-		ID3D12DescriptorHeap* m_pRTVDescHeap = nullptr;
-		ID3D12DescriptorHeap* m_pDSVDescHeap = nullptr;
-		ID3D12DescriptorHeap* m_pTextureDescHeap = nullptr;
+		DescriptorHeap m_RTVDescriptorHeap;
+		DescriptorHeap m_DSVDescriptorHeap;
+		DescriptorHeap m_SRVUAVDescriptorHeap;
 
 		ID3D12RootSignature* m_pVoxelRootSignature = nullptr;
 		ID3D12PipelineState* m_pVoxelPSO = nullptr;
@@ -219,11 +215,6 @@ namespace Okay
 		// can maybe be vector instead? idx 0 is air tho but 3-6 extra bytes don't really matter
 		std::unordered_map<BlockType, SideTextureIDs> m_textureIds;
 
-	private:
-		uint32_t m_rtvIncrementSize = INVALID_UINT32;
-		uint32_t m_dsvIncrementSize = INVALID_UINT32;
-		uint32_t m_cbvSrvUavIncrementSize = INVALID_UINT32;
-
-		ID3D12DescriptorHeap* m_pImguiDescriptorHeap = nullptr;
+		DescriptorHeap m_imguiDescriptorHeap;
 	};
 }
